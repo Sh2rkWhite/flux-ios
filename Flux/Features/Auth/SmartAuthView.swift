@@ -220,7 +220,7 @@ struct SmartAuthView: View {
 
     // MARK: Step 3 — register
 
-    private func registerStep(String) -> some View {
+    private func registerStep(_: String) -> some View {
         VStack(spacing: 0) {
             backButton { resetToUsername() }
                 .padding(.bottom, 20)
@@ -403,7 +403,8 @@ struct SmartAuthView: View {
                             username: user.username ?? username,
                             displayName: user.name,
                             sessionToken: UUID().uuidString,
-                            lastLoginAtMs: Int(Date().timeIntervalSince1970 * 1000)
+                            lastLoginAtMs: Int(Date().timeIntervalSince1970 * 1000),
+                            rememberMe: false
                         ))
                     }
                 }

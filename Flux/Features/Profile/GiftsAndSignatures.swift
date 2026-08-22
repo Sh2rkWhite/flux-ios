@@ -107,7 +107,7 @@ struct GiftCatalogSheet: View {
             withAnimation(FluxMotion.springAnimation) { action() }
         } label: {
             Text(title)
-                .font(.system(size: 13, isActive ? .bold : .medium))
+                .font(.system(size: 13, weight: isActive ? .bold : .medium))
                 .foregroundStyle(isActive ? color : FluxColors.textSecondary)
                 .padding(.horizontal, 12)
                 .frame(height: 34)

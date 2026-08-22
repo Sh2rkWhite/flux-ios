@@ -56,7 +56,7 @@ final class AppEnvironment: ObservableObject {
             if FirebaseApp.app() == nil {
                 FirebaseApp.configure()
             }
-            projectId = FirebaseApp.app()?.options.projectId
+            projectId = FirebaseApp.app()?.options.projectID
         }
 
         let useRemote: Bool

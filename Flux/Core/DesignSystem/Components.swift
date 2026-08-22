@@ -157,8 +157,8 @@ struct FluxSettingsTile<Trailing: View>: View {
         iconColor: Color = FluxColors.blue,
         iconBackground: Color = FluxColors.blueSoft,
         showDivider: Bool = false,
-        onTap: (() -> Void)? = nil,
-        @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }
+        @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() },
+        onTap: (() -> Void)? = nil
     ) {
         self.icon = icon
         self.title = title
@@ -166,8 +166,8 @@ struct FluxSettingsTile<Trailing: View>: View {
         self.iconColor = iconColor
         self.iconBackground = iconBackground
         self.showDivider = showDivider
-        self.onTap = onTap
         self.trailing = trailing
+        self.onTap = onTap
     }
 
     var body: some View {

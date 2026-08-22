@@ -724,8 +724,8 @@ struct UserProfile: Equatable, Codable {
     static var initial: UserProfile {
         UserProfile(
             activityPoints: 0,
-            fluxCoins: 0,
-            badges: [BadgeCatalog.newUser.withEarned(atMs: Int(Date().timeIntervalSince1970 * 1000))]
+            badges: [BadgeCatalog.newUser.withEarned(atMs: Int(Date().timeIntervalSince1970 * 1000))],
+            fluxCoins: 0
         )
     }
 

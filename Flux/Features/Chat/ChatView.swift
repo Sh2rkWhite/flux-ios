@@ -274,8 +274,8 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(Array(displayItems.enumerated()), id: \.element.id) { index, item in
-                        switch item.kind {
+                    ForEach(Array(displayItems.enumerated()), id: \.element.id) { _, item in
+                        switch item {
                         case .dayDivider(let ms):
                             DayDividerView(ms: ms)
                                 .id("day-\(ms)")

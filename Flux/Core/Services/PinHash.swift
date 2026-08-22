@@ -8,7 +8,7 @@ import CryptoKit
 /// interchangeable between platforms.
 enum PinHash {
     static func hash(_ pin: String, salt: String? = nil) -> String {
-        let s = salt ?? String(Date().timeIntervalSince1970 * 1_000_000, radix: 36)
+        let s = salt ?? String(Int(Date().timeIntervalSince1970 * 1_000_000), radix: 36)
         let digest = SHA256.hash(data: Data("\(s):\(pin)".utf8))
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return "\(s):\(hex)"

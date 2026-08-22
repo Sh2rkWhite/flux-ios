@@ -38,13 +38,13 @@ final class FirestoreBackend: LocalBackend {
     override func initBackend() async {
         await super.initBackend()
         remote = FirebaseApp.app() != nil
-            && FirebaseApp.app()?.options.projectId != LocalBackend.placeholderProject
-            && !(FirebaseApp.app()?.options.projectId ?? "").isEmpty
+            && FirebaseApp.app()?.options.projectID != LocalBackend.placeholderProject
+            && !(FirebaseApp.app()?.options.projectID ?? "").isEmpty
         guard remote else {
             print("Flux: Firestore disabled — running local-only.")
             return
         }
-        print("Flux: Firestore project \"\(FirebaseApp.app()?.options.projectId ?? "")\" connected.")
+        print("Flux: Firestore project \"\(FirebaseApp.app()?.options.projectID ?? "")\" connected.")
         await applyRemoteProfile()
         await loadExtendedProfile()
         publishProfile()
@@ -87,12 +87,12 @@ final class FirestoreBackend: LocalBackend {
             name: (data["display_name"] as? String) ?? (data["name"] as? String) ?? "Flux user",
             username: data["username"] as? String,
             status: (data["bio"] as? String) ?? (data["status"] as? String) ?? "",
+            avatarPath: data["avatar_url"] as? String,
             isPremium: data["isPremium"] as? Bool ?? false,
-            isVerified: data["is_verified"] as? Bool ?? false,
             isOnline: data["is_online"] as? Bool ?? false,
             isAdmin: data["is_admin"] as? Bool ?? false,
-            avatarPath: data["avatar_url"] as? String,
-            registeredAtMs: registeredAtMs
+            registeredAtMs: registeredAtMs,
+            isVerified: data["is_verified"] as? Bool ?? false
         )
     }
 
@@ -120,10 +120,10 @@ final class FirestoreBackend: LocalBackend {
             let remoteAdmin = data["is_admin"] as? Bool ?? false
             let remoteVerified = data["is_verified"] as? Bool ?? false
             guard remoteAdmin != cur.isAdmin || remoteVerified != cur.isVerified else { return }
-            var updated = cur
-            updated.isAdmin = remoteAdmin
-            updated.isVerified = remoteVerified
-            me = updated
+            patchMe { user in
+                user.isAdmin = remoteAdmin
+                user.isVerified = remoteVerified
+            }
             persistProfile()
             notify()
         } catch {
@@ -293,14 +293,14 @@ final class FirestoreBackend: LocalBackend {
                     return
                 }
                 Task { @MainActor in
-                    guard let cur = self.me else { return }
-                    var updated = cur
-                    updated.sessions = snapshot.documents.map { doc in
+                    let sessions = snapshot.documents.map { doc in
                         var json = doc.data()
                         json["id"] = doc.documentID
                         return DeviceSession.fromJson(json)
                     }
-                    self.me = updated
+                    self.patchMe { user in
+                        user.sessions = sessions
+                    }
                     self.persistProfile()
                     self.notify()
                 }
@@ -708,9 +708,9 @@ final class FirestoreBackend: LocalBackend {
                 transaction.updateData(["sold": true], forDocument: listingRef)
 
                 // Credit the seller when their remote doc is known.
-                let sellerFluxId = fluxIdOfUser(sellerId)
+                let sellerFluxId = self.fluxIdOfUser(sellerId)
                 if let sellerFluxId, !sellerFluxId.isEmpty, sellerFluxId != myFluxId {
-                    let sellerRef = db.collection("users").document(sellerFluxId)
+                    let sellerRef = self.db.collection("users").document(sellerFluxId)
                         .collection("profile").document("data")
                     let sellerDoc: DocumentSnapshot
                     do {

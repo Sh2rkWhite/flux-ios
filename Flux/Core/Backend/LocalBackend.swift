@@ -313,13 +313,22 @@ class LocalBackend: ObservableObject {
         return user
     }
 
-    func confirmFluxId(_ fluxId: String) async -> FluxUser {
+    func confirmFluxId(_ fluxId: String) async throws -> FluxUser {
         guard var user = me else { throw FluxError.notLoggedIn }
         user.fluxId = fluxId
         me = user
         persistProfile()
         notify()
         return user
+    }
+
+    /// Patches the current profile in place — lets the Firestore subclass
+    /// apply remote flags and session snapshots without exposing a public
+    /// setter for `me`.
+    func patchMe(_ transform: (inout FluxUser) -> Void) {
+        guard var current = me else { return }
+        transform(&current)
+        me = current
     }
 
     func updateMe(name: String? = nil, status: String? = nil, avatarPath: String? = nil, isPremium: Bool? = nil) async {
@@ -463,9 +472,9 @@ class LocalBackend: ObservableObject {
             name: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
             username: trimmedUsername,
             status: "Привет! Я пользуюсь Flux.",
+            registeredAtMs: nowMs,
             passwordHash: hash,
-            email: email.trimmingCharacters(in: .whitespacesAndNewlines),
-            registeredAtMs: nowMs
+            email: email.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         me = user
         persistProfile()
@@ -545,7 +554,7 @@ class LocalBackend: ObservableObject {
             ? "Здравствуйте! Добро пожаловать в мессенджер! Рады вас видеть."
             : "Здравствуйте! Был осуществлен вход в ваш аккаунт.\nУстройство: \(device)\nIP-адрес: \(ip ?? "—")\nПлатформа: \(platform)"
 
-        let bot = securityBotUser()
+        let bot = securityBotValue
         let chat = await openChatWithUser(bot)
 
         let message = FluxMessage(
@@ -883,17 +892,17 @@ class LocalBackend: ObservableObject {
 
     @discardableResult
     func sendImage(_ chatId: String, _ path: String, replyToId: String? = nil) async -> FluxMessage {
-        await pushOutgoing(chatId, .image, mediaPath: path, text: "Фото", replyToId: replyToId)
+        await pushOutgoing(chatId, .image, text: "Фото", mediaPath: path, replyToId: replyToId)
     }
 
     @discardableResult
     func sendVoice(_ chatId: String, _ path: String, _ durationMs: Int, replyToId: String? = nil) async -> FluxMessage {
-        await pushOutgoing(chatId, .voice, mediaPath: path, voiceDurationMs: durationMs, text: "Голосовое сообщение", replyToId: replyToId)
+        await pushOutgoing(chatId, .voice, text: "Голосовое сообщение", mediaPath: path, voiceDurationMs: durationMs, replyToId: replyToId)
     }
 
     @discardableResult
     func sendFile(_ chatId: String, _ path: String, _ fileName: String, _ fileSize: Int, replyToId: String? = nil) async -> FluxMessage {
-        await pushOutgoing(chatId, .file, mediaPath: path, fileName: fileName, fileSize: fileSize, text: fileName, replyToId: replyToId)
+        await pushOutgoing(chatId, .file, text: fileName, mediaPath: path, fileName: fileName, fileSize: fileSize, replyToId: replyToId)
     }
 
     private func updateChatPreview(_ chatId: String, _ message: FluxMessage) {
@@ -1541,7 +1550,7 @@ class LocalBackend: ObservableObject {
     /// Posts a user report into the security-bot chat (a real action for
     /// the profile "Пожаловаться" button).
     func submitReport(against user: FluxUser) async {
-        let bot = securityBotUser()
+        let bot = securityBotValue
         let chat = await openChatWithUser(bot)
         let nowMs = Int(Date().timeIntervalSince1970 * 1000)
         let text = "⚠️ Жалоба на пользователя \(user.name) (@\(user.username ?? "—"), \(user.fluxId))"
