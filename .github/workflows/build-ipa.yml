@@ -23,6 +23,17 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Inject Firebase config (from repo secret)
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.FIREBASE_PLIST }}" ]; then
+            printf '%s' "${{ secrets.FIREBASE_PLIST }}" | base64 -d > Flux/GoogleService-Info.plist
+            plutil -lint Flux/GoogleService-Info.plist
+            echo "Firebase config injected — the app will sync with the shared Firestore."
+          else
+            echo "FIREBASE_PLIST secret not set — building in offline local mode."
+          fi
+
       - name: Generate Xcode project
         run: xcodegen generate
 
