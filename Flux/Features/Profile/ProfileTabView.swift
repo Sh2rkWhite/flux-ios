@@ -109,7 +109,10 @@ struct ProfileTabView: View {
     }
 
     private var premiumBanner: some View {
-        NavigationLink(value: Route.settings) {
+        Button {
+            Haptics.success()
+            Task { await backend.updateMe(isPremium: !(backend.me?.isPremium ?? false)) }
+        } label: {
             HStack(spacing: 12) {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.white.opacity(0.2))
@@ -139,10 +142,6 @@ struct ProfileTabView: View {
             )
         }
         .buttonStyle(ScaleButtonStyle(scale: 0.98))
-        .simultaneousGesture(TapGesture().onEnded {
-            Haptics.success()
-            Task { await backend.updateMe(isPremium: !(backend.me?.isPremium ?? false)) }
-        })
         .padding(EdgeInsets(top: 12, leading: 8, bottom: 6, trailing: 8))
     }
 

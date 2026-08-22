@@ -171,6 +171,24 @@ struct FluxSettingsTile<Trailing: View>: View {
     }
 
     var body: some View {
+        Group {
+            if let onTap {
+                tileContent
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        Haptics.light()
+                        onTap()
+                    }
+            } else {
+                // No tap handler: keep the row inert so the enclosing
+                // Button / NavigationLink receives the tap instead of a
+                // no-op gesture stealing it.
+                tileContent
+            }
+        }
+    }
+
+    private var tileContent: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -201,13 +219,6 @@ struct FluxSettingsTile<Trailing: View>: View {
                 Divider()
                     .overlay(FluxColors.separator)
                     .padding(.leading, 66)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if let onTap {
-                Haptics.light()
-                onTap()
             }
         }
     }
