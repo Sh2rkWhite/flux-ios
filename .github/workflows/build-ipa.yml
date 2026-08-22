@@ -25,11 +25,11 @@ jobs:
 
       - name: Inject Firebase config (from repo secret)
         env:
-          FIREBASE_PLIST_B64: ${{ secrets.FIREBASE_PLIST }}
+          FIREBASE_PLIST_CONTENT: ${{ secrets.FIREBASE_PLIST }}
         shell: bash
         run: |
-          if [ -n "$FIREBASE_PLIST_B64" ]; then
-            printf '%s' "$FIREBASE_PLIST_B64" | base64 -d > Flux/GoogleService-Info.plist
+          if [ -n "$FIREBASE_PLIST_CONTENT" ]; then
+            printf '%s\n' "$FIREBASE_PLIST_CONTENT" > Flux/GoogleService-Info.plist
             plutil -lint Flux/GoogleService-Info.plist
             echo "Firebase config injected — the app will sync with the shared Firestore."
           else
