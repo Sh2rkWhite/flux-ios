@@ -1,0 +1,15 @@
+# Xcode / build artifacts
+build/
+DerivedData/
+*.xcodeproj
+xcuserdata/
+.swiftpm/
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# Firebase config (never commit the real one)
+Flux/GoogleService-Info.plist
+
+# macOS
+.DS_Store

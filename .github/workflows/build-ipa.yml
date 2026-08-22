@@ -1,0 +1,71 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-ipa:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: |
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Resolve Swift Package dependencies
+        run: |
+          set -o pipefail
+          xcodebuild -resolvePackageDependencies \
+            -project Flux.xcodeproj \
+            -scheme Flux
+
+      - name: Archive (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project Flux.xcodeproj \
+            -scheme Flux \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/Flux.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS=""
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R "build/Flux.xcarchive/Products/Applications/Flux.app" build/Payload/
+          cd build
+          zip -qry Flux-unsigned.ipa Payload
+          ls -lh Flux-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Flux-unsigned-ipa
+          path: build/Flux-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Upload Xcode project (for debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-xcodeproj
+          path: |
+            Flux.xcodeproj
+          if-no-files-found: warn

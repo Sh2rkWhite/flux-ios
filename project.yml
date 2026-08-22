@@ -1,0 +1,72 @@
+# XcodeGen specification for the native Flux iOS app.
+# Generate the Xcode project on a Mac with:
+#   brew install xcodegen
+#   cd ios-native && xcodegen generate
+#   open Flux.xcodeproj
+name: Flux
+options:
+  bundleIdPrefix: com.flux3
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  defaultConfig: Debug
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "3.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: false
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: false
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk
+    from: 11.0.0
+targets:
+  Flux:
+    type: application
+    platform: iOS
+    sources:
+      - Flux
+    dependencies:
+      - package: Firebase
+        product: FirebaseCore
+      - package: Firebase
+        product: FirebaseFirestore
+    info:
+      path: Flux/Info.plist
+      properties:
+        CFBundleDisplayName: Flux
+        CFBundleShortVersionString: "3.0.0"
+        CFBundleVersion: "1"
+        CFBundlePackageType: APPL
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSupportsIndirectInputEvents: true
+        NSCameraUsageDescription: "Flux использует камеру для фото, видеозвонков и сканирования QR-кодов."
+        NSMicrophoneUsageDescription: "Flux использует микрофон для голосовых сообщений и звонков."
+        NSPhotoLibraryUsageDescription: "Flux открывает вашу фототеку, чтобы отправлять изображения."
+        NSPhotoLibraryAddUsageDescription: "Flux сохраняет полученные изображения в вашу фототеку."
+        NSFaceIDUsageDescription: "Flux использует Face ID для быстрого входа и разблокировки приложения."
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+        CFBundleURLTypes:
+          - CFBundleURLName: com.flux3.qr
+            CFBundleURLSchemes:
+              - flux
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.flux3.ios
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+schemes:
+  Flux:
+    build:
+      targets:
+        Flux: all
+    run:
+      config: Debug
+    archive:
+      config: Release
