@@ -100,6 +100,12 @@ class LocalBackend: ObservableObject {
     var awardedXpMessageIds: Set<String> = []
     var marketplaceStorage: [MarketplaceListing] = []
 
+    // FluxCoinsBot state (single-device demo; the Firestore backend replaces
+    // it with the shared `coinsBot/` namespace).
+    private var botChecksStorage: [FluxCheck] = []
+    private var botOffersStorage: [FluxP2pOffer] = []
+    private var botDealsStorage: [FluxP2pDeal] = []
+
     private var bioLoginUsernameValue: String?
     private var pendingTasks: Set<Task<Void, Never>> = []
 
@@ -379,6 +385,26 @@ class LocalBackend: ObservableObject {
         notify()
     }
 
+    /// Publishes a story to the own profile (`myProfile.stories`), newest
+    /// first, with a 24-hour expiry — the backend path of the «Создать
+    /// историю» composer.
+    @discardableResult
+    func publishStory(mediaPath: String, caption: String? = nil) async -> FluxStory {
+        let nowMs = Int(Date().timeIntervalSince1970 * 1000)
+        let story = FluxStory(
+            id: UUID().uuidString,
+            userId: me?.id ?? "me",
+            mediaPath: mediaPath,
+            createdAtMs: nowMs,
+            expiresAtMs: nowMs + 24 * 3600 * 1000,
+            caption: (caption?.isEmpty == false) ? caption : nil
+        )
+        userProfileValue.stories.insert(story, at: 0)
+        saveUserProfile()
+        notify()
+        return story
+    }
+
     /// Signs the local user out: clears profile, sessions, chats, messages,
     /// calls and preferences. The credential registry and marketplace
     /// listings survive so signing back in and the shared marketplace
@@ -497,6 +523,8 @@ class LocalBackend: ObservableObject {
         notify()
 
         try await postSecurityMessage(welcome: true)
+        // Seed the @FluxCoinsBot contact + chat.
+        ensureCoinsBot()
         await recordLoginSession()
         _ = await checkAndUpdateDailyStreak()
         return user
@@ -521,6 +549,8 @@ class LocalBackend: ObservableObject {
         notify()
 
         try await postSecurityMessage(welcome: false)
+        // Seed the @FluxCoinsBot contact + chat.
+        ensureCoinsBot()
         await recordLoginSession()
         _ = await checkAndUpdateDailyStreak()
         return found
@@ -536,6 +566,7 @@ class LocalBackend: ObservableObject {
         persistProfile()
         notify()
         try await postSecurityMessage(welcome: false)
+        ensureCoinsBot()
         await recordLoginSession()
         _ = await checkAndUpdateDailyStreak()
         return found
@@ -572,16 +603,29 @@ class LocalBackend: ObservableObject {
         notify()
     }
 
+    /// Public hook so FirestoreBackend can post the security-bot
+    /// notification after remote logins.
+    func postSecurityNotification(welcome: Bool) async throws {
+        try await postSecurityMessage(welcome: welcome)
+    }
+
     // MARK: - Directory
 
     var directory: [FluxUser] {
         contacts.values
-            .filter { $0.id != FluxUser.supportId && $0.id != FluxUser.securityBotId }
+            .filter { $0.id != FluxUser.supportId && $0.id != FluxUser.securityBotId && $0.id != FluxUser.coinsBotId }
             .sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
 
     func userById(_ id: String) -> FluxUser? {
         contacts[id]
+    }
+
+    /// Resolves a user by id. The local implementation only knows cached
+    /// contacts; the Firestore subclass fetches unknown users on demand so
+    /// opening a profile from a chat always works.
+    func ensureUser(_ userId: String) async -> FluxUser? {
+        userById(userId)
     }
 
     func searchUsers(_ query: String) -> [FluxUser] {
@@ -617,6 +661,22 @@ class LocalBackend: ObservableObject {
         contacts[user.id] = user
         saveContacts()
         notify()
+    }
+
+    // MARK: - Moderation (admin, spec 0.7)
+
+    /// Sets or lifts mute/freeze for a user (`untilMs == 0` lifts). The
+    /// Firestore subclass mirrors the write to `users/{fluxId}`.
+    func setModeration(_ user: FluxUser, mute: Bool, untilMs: Int, reason: String?) {
+        var updated = user
+        if mute {
+            updated.mutedUntilMs = untilMs
+            updated.mutedReason = reason
+        } else {
+            updated.frozenUntilMs = untilMs
+            updated.frozenReason = reason
+        }
+        upsertContact(updated)
     }
 
     private var supportUserValue: FluxUser {
@@ -826,6 +886,38 @@ class LocalBackend: ObservableObject {
         typingChatIds.contains(chatId)
     }
 
+    // MARK: - Flux Support AI
+
+    /// Shows / hides the «печатает…» indicator for the support chat while
+    /// the Support AI generates a reply (mirrors Android `setSupportTyping`).
+    func setSupportTyping(_ chatId: String, _ typing: Bool) {
+        if typing {
+            typingChatIds.insert(chatId)
+        } else {
+            typingChatIds.remove(chatId)
+        }
+        notify()
+    }
+
+    /// Appends a reply authored by the Flux Support user (mirrors Android
+    /// `postSupportReply`). Used by the Support AI flow.
+    func postSupportReply(_ chatId: String, _ text: String, system: Bool = false) {
+        guard chatStorage[chatId] != nil else { return }
+        let message = FluxMessage(
+            id: UUID().uuidString,
+            chatId: chatId,
+            senderId: FluxUser.supportId,
+            text: text,
+            sentAtMs: Int(Date().timeIntervalSince1970 * 1000),
+            isSystemMessage: system
+        )
+        messageStorage.append(message)
+        updateChatPreview(chatId, message)
+        saveMessages()
+        saveChats()
+        notify()
+    }
+
     private var outgoingExpiryMs: Int? {
         let now = Int(Date().timeIntervalSince1970 * 1000)
         var expiry: Int? = nil
@@ -871,7 +963,7 @@ class LocalBackend: ObservableObject {
         saveChats()
         if message.expiresAtMs != nil { scheduleExpiry(message) }
         notify()
-        if simulatePeers, let peer = chatWithPeer(chatId), peer.id != FluxUser.securityBotId {
+        if simulatePeers, let peer = chatWithPeer(chatId), peer.id != FluxUser.securityBotId, peer.id != FluxUser.coinsBotId {
             simulatePeerResponse(chatId)
         }
         return message
@@ -883,7 +975,7 @@ class LocalBackend: ObservableObject {
         // +1 XP for sending a text message (skip system/bot chats).
         let chat = chatStorage[chatId]
         let peer = chat.flatMap { contacts[$0.peerId] }
-        let isSystemChat = peer?.id == FluxUser.securityBotId || peer?.id == FluxUser.supportId
+        let isSystemChat = peer?.id == FluxUser.securityBotId || peer?.id == FluxUser.supportId || peer?.id == FluxUser.coinsBotId
         if !isSystemChat, me != nil {
             _ = await awardXp(messageId: message.id, xp: 1)
         }
@@ -1052,8 +1144,10 @@ class LocalBackend: ObservableObject {
     }
 
     /// Injects a message delivered by the network layer (Firestore
-    /// listener). Duplicate ids are ignored.
-    func ingestRemoteMessage(_ message: FluxMessage, preview: String? = nil) {
+    /// listener). Duplicate ids are ignored. `incrementUnread` is false
+    /// for the user's own messages restored from the server (e.g. after
+    /// re-login on a fresh device).
+    func ingestRemoteMessage(_ message: FluxMessage, preview: String? = nil, incrementUnread: Bool = true) {
         guard !messageStorage.contains(where: { $0.id == message.id }) else { return }
         messageStorage.append(message)
         if let chat = chatStorage[message.chatId] {
@@ -1061,7 +1155,8 @@ class LocalBackend: ObservableObject {
                 id: chat.id, peerId: chat.peerId, createdAtMs: chat.createdAtMs,
                 lastMessagePreview: preview ?? message.text,
                 lastMessageAtMs: message.sentAtMs,
-                unreadCount: chat.unreadCount + 1, pinned: chat.pinned
+                unreadCount: incrementUnread ? chat.unreadCount + 1 : chat.unreadCount,
+                pinned: chat.pinned
             )
         }
         if message.expiresAtMs != nil { scheduleExpiry(message) }
@@ -1132,7 +1227,7 @@ class LocalBackend: ObservableObject {
 
     var biometricLoginUsername: String? { bioLoginUsernameValue }
 
-    func saveBiometricLogin(_ username: String) async {
+    func saveBiometricLogin(_ username: String, password: String? = nil) async {
         bioLoginUsernameValue = username
         defaults.set(username, forKey: Self.kBioLoginUsername)
     }
@@ -1588,5 +1683,299 @@ class LocalBackend: ObservableObject {
         marketplaceStorage = merged.values.sorted { $0.listedAtMs > $1.listedAtMs }
         saveMarketplace()
         notify()
+    }
+
+    // MARK: - FluxCoinsBot (@FluxCoinsBot)
+
+    /// Authoritatively replaces the local balance and transaction history with
+    /// the server state. Called by the Firestore backend after an atomic bot
+    /// transaction commits, so the device always mirrors the shared ledger.
+    func replaceLocalCoins(balance: Int, transactions: [CoinTransaction]) {
+        userProfileValue.fluxCoins = balance
+        userProfileValue.coinTransactions = transactions
+        saveUserProfile()
+        notify()
+    }
+
+    /// Replaces the FluxCoinsBot caches with a snapshot from the shared
+    /// backend (Firestore listeners). Used by the Firestore backend.
+    func syncBotChecks(_ checks: [FluxCheck]) {
+        botChecksStorage = checks.sorted { $0.createdAtMs > $1.createdAtMs }
+        notify()
+    }
+
+    func syncBotOffers(_ offers: [FluxP2pOffer]) {
+        botOffersStorage = offers.sorted { $0.createdAtMs > $1.createdAtMs }
+        notify()
+    }
+
+    func syncBotDeals(_ deals: [FluxP2pDeal]) {
+        botDealsStorage = deals.sorted { $0.createdAtMs > $1.createdAtMs }
+        notify()
+    }
+
+    var myFluxId: String { me?.fluxId ?? "" }
+
+    private var coinsBotUserValue: FluxUser {
+        if let existing = contacts[FluxUser.coinsBotId] { return existing }
+        let bot = FluxUser(
+            id: FluxUser.coinsBotId,
+            fluxId: "FLX-COINS",
+            name: "Flux Coins",
+            username: "FluxCoinsBot",
+            status: "Баланс · переводы · P2P · чеки",
+            isOnline: true,
+            isVerified: true
+        )
+        contacts[bot.id] = bot
+        saveContacts()
+        if chatWithPeer(bot.id) == nil {
+            Task { await self.seedCoinsBotChat(bot) }
+        }
+        return bot
+    }
+
+    /// Creates the bot chat with a one-time welcome system message so
+    /// @FluxCoinsBot is visible in the chat list.
+    private func seedCoinsBotChat(_ bot: FluxUser) async {
+        let chat = await openChatWithUser(bot)
+        let message = FluxMessage(
+            id: UUID().uuidString,
+            chatId: chat.id,
+            senderId: bot.id,
+            text: "Здравствуйте! Я — Flux Coins Bot.\n\nЗдесь вы можете управлять своими Flux Coins: баланс, переводы, чеки и P2P-обмен.\n\nНажмите на мой аватар или имя, чтобы открыть интерфейс бота.",
+            sentAtMs: Int(Date().timeIntervalSince1970 * 1000),
+            isSystemMessage: true
+        )
+        messageStorage.append(message)
+        updateChatPreview(chat.id, message)
+        saveMessages()
+        saveChats()
+        notify()
+    }
+
+    @discardableResult
+    func ensureCoinsBot() -> FluxUser { coinsBotUserValue }
+
+    func coinsTransfer(toFluxId: String, amount: Int) async throws -> String {
+        guard amount > 0 else { throw FluxError("Сумма должна быть больше нуля") }
+        if toFluxId.isEmpty || toFluxId == myFluxId {
+            throw FluxError("Нельзя перевести самому себе")
+        }
+        try await spendCoinsWithTransaction(
+            amount: amount,
+            type: .coinsTransferSent,
+            description: "Перевод → \(toFluxId)"
+        )
+        let txId = userProfileValue.coinTransactions.first?.id ?? ""
+        // Local mode: credit a known recipient's cached profile so both sides
+        // of the transfer are visible. The Firestore backend overrides this
+        // with an atomic cross-user transaction on the shared backend.
+        let normalized = toFluxId.uppercased()
+        if let recipient = contacts.values.first(where: { $0.fluxId.uppercased() == normalized }) {
+            var rp = userProfiles[recipient.id] ?? UserProfile()
+            rp.fluxCoins += amount
+            rp.coinTransactions.insert(CoinTransaction(
+                id: UUID().uuidString,
+                userId: recipient.id,
+                amount: amount,
+                type: .coinsTransferReceived,
+                timestampMs: Int(Date().timeIntervalSince1970 * 1000),
+                description: "Входящий перевод от \(myFluxId)"
+            ), at: 0)
+            userProfiles[recipient.id] = rp
+            saveUserProfiles()
+        }
+        notify()
+        return txId
+    }
+
+    func createCheck(amount: Int, recipientFluxId: String? = nil, ttlMs: Int? = nil) async throws -> FluxCheck {
+        guard amount > 0 else { throw FluxError("Сумма должна быть больше нуля") }
+        let nowMs = Int(Date().timeIntervalSince1970 * 1000)
+        let check = FluxCheck(
+            id: UUID().uuidString,
+            amount: amount,
+            creatorFluxId: myFluxId,
+            status: .active,
+            transactionId: UUID().uuidString,
+            createdAtMs: nowMs,
+            recipientFluxId: recipientFluxId,
+            expiresAtMs: ttlMs.map { nowMs + $0 }
+        )
+        try await spendCoinsWithTransaction(
+            amount: amount,
+            type: .checkCreated,
+            description: "Создание чека на \(amount)",
+            relatedObjectId: check.id
+        )
+        botChecksStorage.insert(check, at: 0)
+        notify()
+        return check
+    }
+
+    func redeemCheck(_ checkId: String) async throws -> FluxCheck {
+        guard let i = botChecksStorage.firstIndex(where: { $0.id == checkId }) else {
+            throw FluxError("Чек не найден")
+        }
+        let check = botChecksStorage[i]
+        let nowMs = Int(Date().timeIntervalSince1970 * 1000)
+        guard check.status == .active else { throw FluxError("Этот чек уже использован") }
+        if check.isExpired(nowMs) { throw FluxError("Срок действия чека истёк") }
+        if let recipientFluxId = check.recipientFluxId, recipientFluxId != myFluxId {
+            throw FluxError("Этот чек предназначен другому пользователю")
+        }
+        let consumed = check.copyWith(status: .redeemed, redeemedByFluxId: myFluxId, redeemedAtMs: nowMs)
+        botChecksStorage[i] = consumed
+        await awardCoinsWithTransaction(
+            amount: check.amount,
+            type: .checkRedeemed,
+            description: "Получение по чеку",
+            relatedObjectId: check.id
+        )
+        return consumed
+    }
+
+    func cancelCheck(_ checkId: String) async throws {
+        guard let i = botChecksStorage.firstIndex(where: { $0.id == checkId }) else {
+            throw FluxError("Чек не найден")
+        }
+        let check = botChecksStorage[i]
+        guard check.status == .active else { throw FluxError("Чек уже закрыт") }
+        guard check.creatorFluxId == myFluxId else { throw FluxError("Отменить может только создатель чека") }
+        botChecksStorage[i] = check.copyWith(status: .cancelled)
+        await awardCoinsWithTransaction(
+            amount: check.amount,
+            type: .checkRefund,
+            description: "Возврат по чеку",
+            relatedObjectId: check.id
+        )
+    }
+
+    var myChecks: [FluxCheck] {
+        botChecksStorage.filter { $0.creatorFluxId == myFluxId }
+    }
+
+    func createP2pSellOffer(coinAmount: Int, priceNote: String = "") async throws -> FluxP2pOffer {
+        guard coinAmount > 0 else { throw FluxError("Сумма должна быть больше нуля") }
+        let nowMs = Int(Date().timeIntervalSince1970 * 1000)
+        let offer = FluxP2pOffer(
+            id: UUID().uuidString,
+            side: .sell,
+            coinAmount: coinAmount,
+            creatorFluxId: myFluxId,
+            status: .open,
+            transactionId: UUID().uuidString,
+            createdAtMs: nowMs,
+            priceNote: priceNote
+        )
+        try await spendCoinsWithTransaction(
+            amount: coinAmount,
+            type: .p2pEscrow,
+            description: "P2P: блокировка \(coinAmount)",
+            relatedObjectId: offer.id
+        )
+        botOffersStorage.insert(offer, at: 0)
+        notify()
+        return offer
+    }
+
+    var p2pOpenOffers: [FluxP2pOffer] {
+        botOffersStorage.filter { $0.status == .open && $0.creatorFluxId != myFluxId }
+    }
+
+    func acceptP2pOffer(_ offerId: String) async throws -> FluxP2pDeal {
+        guard let i = botOffersStorage.firstIndex(where: { $0.id == offerId }) else {
+            throw FluxError("Предложение не найдено")
+        }
+        let offer = botOffersStorage[i]
+        guard offer.status == .open else { throw FluxError("Предложение уже недоступно") }
+        guard offer.creatorFluxId != myFluxId else { throw FluxError("Нельзя принять собственное предложение") }
+        let nowMs = Int(Date().timeIntervalSince1970 * 1000)
+        let deal = FluxP2pDeal(
+            id: UUID().uuidString,
+            offerId: offer.id,
+            sellerFluxId: offer.creatorFluxId,
+            buyerFluxId: myFluxId,
+            coinAmount: offer.coinAmount,
+            status: .escrow,
+            transactionId: UUID().uuidString,
+            createdAtMs: nowMs
+        )
+        botOffersStorage[i] = offer.copyWith(status: .matched)
+        botDealsStorage.insert(deal, at: 0)
+        notify()
+        return deal
+    }
+
+    func confirmP2pDeal(_ dealId: String) async throws -> FluxP2pDeal {
+        guard let i = botDealsStorage.firstIndex(where: { $0.id == dealId }) else {
+            throw FluxError("Сделка не найдена")
+        }
+        let deal = botDealsStorage[i]
+        guard deal.status == .escrow else { throw FluxError("Сделка уже завершена") }
+        guard deal.sellerFluxId == myFluxId else { throw FluxError("Подтвердить сделку может только продавец") }
+        let done = deal.copyWith(status: .completed, resolvedAtMs: Int(Date().timeIntervalSince1970 * 1000))
+        botDealsStorage[i] = done
+        if deal.buyerFluxId == myFluxId {
+            await awardCoinsWithTransaction(
+                amount: deal.coinAmount,
+                type: .p2pReleased,
+                description: "P2P: получение",
+                relatedObjectId: deal.id
+            )
+        }
+        notify()
+        return done
+    }
+
+    func disputeP2pDeal(_ dealId: String) async throws -> FluxP2pDeal {
+        guard let i = botDealsStorage.firstIndex(where: { $0.id == dealId }) else {
+            throw FluxError("Сделка не найдена")
+        }
+        let deal = botDealsStorage[i]
+        guard deal.status == .escrow else { throw FluxError("Спор можно открыть только по активной сделке") }
+        let disputed = deal.copyWith(status: .disputed)
+        botDealsStorage[i] = disputed
+        notify()
+        return disputed
+    }
+
+    func cancelP2p(_ refId: String) async throws {
+        if let oi = botOffersStorage.firstIndex(where: { $0.id == refId }) {
+            let offer = botOffersStorage[oi]
+            guard offer.status == .open else { throw FluxError("Предложение уже недоступно") }
+            guard offer.creatorFluxId == myFluxId else { throw FluxError("Отменить может только автор предложения") }
+            botOffersStorage[oi] = offer.copyWith(status: .cancelled)
+            await awardCoinsWithTransaction(
+                amount: offer.coinAmount,
+                type: .p2pRefund,
+                description: "P2P: возврат",
+                relatedObjectId: offer.id
+            )
+            return
+        }
+        if let di = botDealsStorage.firstIndex(where: { $0.id == refId }) {
+            let deal = botDealsStorage[di]
+            guard deal.status == .escrow else { throw FluxError("Сделка уже завершена") }
+            botDealsStorage[di] = deal.copyWith(
+                status: .cancelled,
+                resolvedAtMs: Int(Date().timeIntervalSince1970 * 1000)
+            )
+            if deal.sellerFluxId == myFluxId {
+                await awardCoinsWithTransaction(
+                    amount: deal.coinAmount,
+                    type: .p2pRefund,
+                    description: "P2P: возврат",
+                    relatedObjectId: deal.id
+                )
+            }
+            return
+        }
+        throw FluxError("Не найдено")
+    }
+
+    var myP2pDeals: [FluxP2pDeal] {
+        botDealsStorage.filter { $0.sellerFluxId == myFluxId || $0.buyerFluxId == myFluxId }
     }
 }

@@ -11,6 +11,8 @@ struct PrivacyView: View {
     @State private var showSetPin = false
     @State private var showAutoDeleteSheet = false
     @State private var showAdvancedSheet = false
+    @State private var showPremiumSheet = false
+    @State private var pushSupportChat = false
 
     var body: some View {
         ScrollView {
@@ -89,6 +91,18 @@ struct PrivacyView: View {
         .sheet(isPresented: $showSetPin) { SetPinSheet() }
         .sheet(isPresented: $showAutoDeleteSheet) { autoDeleteSheet }
         .sheet(isPresented: $showAdvancedSheet) { advancedSheet }
+        .sheet(isPresented: $showPremiumSheet) {
+            PremiumSheet {
+                Task {
+                    _ = await backend.openChatWithUser(backend.ensureSupportUser())
+                    pushSupportChat = true
+                }
+            }
+            .presentationDetents([.fraction(0.72), .large])
+        }
+        .navigationDestination(isPresented: $pushSupportChat) {
+            ChatView(chatId: backend.chatWithPeer(FluxUser.supportId)?.id ?? "")
+        }
         .onAppear {
             ScreenshotMonitor.shared.attach(backend: backend)
         }
@@ -266,7 +280,7 @@ struct PrivacyView: View {
             }
             Spacer(minLength: 12)
         }
-        .background(FluxColors.background.ignoresSafeArea())
+        .background(Material.ultraThinMaterial)
         .presentationDetents([.medium, .large])
     }
 
@@ -286,15 +300,15 @@ struct PrivacyView: View {
             }
             .padding(.horizontal, 8)
             if backend.me?.isPremium != true {
-                FluxButton(title: "Включить Flux Premium") {
-                    Task { await backend.updateMe(isPremium: true) }
+                FluxButton(title: "Подробнее о Flux Premium") {
                     showAdvancedSheet = false
+                    showPremiumSheet = true
                 }
                 .padding(20)
             }
             Spacer(minLength: 12)
         }
-        .background(FluxColors.background.ignoresSafeArea())
+        .background(Material.ultraThinMaterial)
         .presentationDetents([.medium])
     }
 

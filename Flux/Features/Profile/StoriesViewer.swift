@@ -18,15 +18,10 @@ struct StoriesViewer: View {
             Color.black.ignoresSafeArea()
 
             if let story {
-                if let image = UIImage(contentsOfFile: story.mediaPath) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .ignoresSafeArea()
-                } else {
+                RemoteMediaImage(path: story.mediaPath) {
                     Rectangle().fill(FluxColors.gradient)
-                        .ignoresSafeArea()
                 }
+                .ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     // Progress bars

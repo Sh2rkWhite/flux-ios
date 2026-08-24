@@ -20,6 +20,11 @@ struct ChatView: View {
     @State private var toast: Toast?
     @State private var levelUp: (level: Int, badges: [FluxBadge])?
     @State private var lastKnownLevel: Int?
+    /// One-time guard for the «Support AI unavailable» system notice.
+    @State private var supportUnavailableNotified = false
+    /// Programmatic push targets resolved by `openPeerProfile()`.
+    @State private var pushProfileUserId: String?
+    @State private var pushCoinsBot = false
 
     @StateObject private var recorder = VoiceRecorder()
     @ObservedObject private var audioPlayer = AudioPlayerManager.shared
@@ -41,7 +46,11 @@ struct ChatView: View {
             topBar
             Divider().overlay(FluxColors.separator)
             messageList
-            if recorder.recording {
+            if backend.me?.isFrozen == true {
+                frozenBanner
+            } else if peer?.isCoinsBot == true {
+                coinsBotOpenBar
+            } else if recorder.recording {
                 RecordingBar(recorder: recorder) { send in
                     if let result = recorder.stop(send: send), !result.0.isEmpty {
                         Task {
@@ -60,6 +69,7 @@ struct ChatView: View {
                             } else {
                                 _ = await backend.sendText(chatId, text, replyToId: replyTarget?.id)
                                 replyTarget = nil
+                                await maybeSupportAiReply()
                             }
                             checkLevelUp()
                         }
@@ -147,10 +157,25 @@ struct ChatView: View {
         .onAppear {
             Task { await backend.markChatRead(chatId) }
             lastKnownLevel = backend.myProfile.level
+            fetchPeerIfNeeded()
         }
         .onChange(of: chat?.unreadCount) { unread in
             if unread ?? 0 > 0 {
                 Task { await backend.markChatRead(chatId) }
+            }
+        }
+        .navigationDestination(isPresented: Binding(
+            get: { pushCoinsBot },
+            set: { pushCoinsBot = $0 }
+        )) {
+            CoinsBotView()
+        }
+        .navigationDestination(isPresented: Binding(
+            get: { pushProfileUserId != nil },
+            set: { if !$0 { pushProfileUserId = nil } }
+        )) {
+            if let userId = pushProfileUserId {
+                UserProfileView(userId: userId)
             }
         }
     }
@@ -186,6 +211,100 @@ struct ChatView: View {
         .presentationDragIndicator(.hidden)
     }
 
+    // MARK: Frozen banner
+
+    private var frozenBanner: some View {
+        Text("❄️ Аккаунт заморожен. Доступно только чтение.")
+            .font(.system(size: 13.5, weight: .semibold))
+            .foregroundStyle(FluxColors.warning)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(FluxColors.warning.opacity(0.12))
+            )
+            .padding(12)
+    }
+
+    // MARK: Coins bot input replacement
+
+    /// @FluxCoinsBot chat: the composer is replaced by a single CTA that
+    /// opens the bot interface (mirrors the Dart chat screen).
+    private var coinsBotOpenBar: some View {
+        Button {
+            Haptics.light()
+            pushCoinsBot = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "dollarsign.circle.fill")
+                    .font(.system(size: 18))
+                Text("Открыть Flux Coins Bot")
+                    .font(.system(size: 16, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(FluxColors.gradient)
+                    .shadow(color: FluxColors.blue.opacity(0.32), radius: 18, y: 8)
+            )
+        }
+        .buttonStyle(ScaleButtonStyle(scale: 0.97))
+        .padding(12)
+    }
+
+    // MARK: Peer resolution
+
+    /// Opens the profile of the chat peer (avatar / name tap). Always targets
+    /// the peer's own id — never the local user — and fetches the real user
+    /// document on demand when the contact is not cached yet (mirrors the
+    /// Dart `_openPeerProfile`).
+    private func openPeerProfile() {
+        // The only valid target is the chat peer (= sender of incoming
+        // messages). The local user's id must never be substituted.
+        let targetId = peer?.id ?? chat?.peerId
+        guard let targetId, !targetId.isEmpty else { return }
+        // @FluxCoinsBot has no profile — taps open the bot interface instead.
+        if targetId == FluxUser.coinsBotId {
+            Haptics.light()
+            pushCoinsBot = true
+            return
+        }
+        let meId = backend.me?.id
+        if let meId, targetId == meId { return }
+
+        if let user = peer ?? backend.userById(targetId) {
+            // Defensive: a 1:1 chat peer must never resolve to the local user.
+            if let meId, user.id == meId { return }
+            Haptics.light()
+            pushProfileUserId = user.id
+            return
+        }
+        Task {
+            let user = await backend.ensureUser(targetId)
+            guard let user else {
+                toast = Toast(text: "Не удалось загрузить профиль пользователя", isError: true)
+                return
+            }
+            // Defensive: a 1:1 chat peer must never resolve to the local user.
+            if let meId, user.id == meId { return }
+            Haptics.light()
+            pushProfileUserId = user.id
+        }
+    }
+
+    /// The chat may arrive from the shared backend before the directory pull
+    /// finished — fetch the peer contact on demand instead of showing an
+    /// empty header.
+    private func fetchPeerIfNeeded() {
+        guard peer == nil, let peerId = chat?.peerId, !peerId.isEmpty else { return }
+        guard peerId != backend.me?.id else { return }
+        Task { _ = await backend.ensureUser(peerId) }
+    }
+
     // MARK: Top bar
 
     private var topBar: some View {
@@ -201,30 +320,17 @@ struct ChatView: View {
             }
             .buttonStyle(ScaleButtonStyle())
 
-            NavigationLink(value: Route.userProfile(userId: peer?.id ?? "")) {
-                HStack(spacing: 11) {
-                    FluxAvatarView(
-                        user: peer,
-                        size: 40,
-                        showOnline: true,
-                        onlineOverride: backend.privacy.showOnline ? nil : false
-                    )
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(peer?.name ?? "Flux")
-                            .font(.system(size: 16.5, weight: .bold))
-                            .foregroundStyle(FluxColors.textPrimary)
-                            .lineLimit(1)
-                        subtitle
-                    }
-                }
+            Button {
+                openPeerProfile()
+            } label: {
+                peerHeaderContent
             }
             .buttonStyle(.plain)
-            .disabled(peer == nil)
 
             Spacer()
 
-            if peer?.isSupport != true {
-                NavigationLink(value: Route.inCall(peerId: peer?.id ?? "", video: false)) {
+            if let peer, !peer.isSupport, !peer.isCoinsBot {
+                NavigationLink(value: Route.inCall(peerId: peer.id, video: false)) {
                     ZStack {
                         Circle().fill(FluxColors.surfaceGray).frame(width: 40, height: 40)
                         Image(systemName: "phone.fill")
@@ -233,7 +339,7 @@ struct ChatView: View {
                     }
                 }
                 .buttonStyle(ScaleButtonStyle(scale: 0.9))
-                NavigationLink(value: Route.inCall(peerId: peer?.id ?? "", video: true)) {
+                NavigationLink(value: Route.inCall(peerId: peer.id, video: true)) {
                     ZStack {
                         Circle().fill(FluxColors.surfaceGray).frame(width: 40, height: 40)
                         Image(systemName: "video.fill")
@@ -246,6 +352,24 @@ struct ChatView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
+    }
+
+    private var peerHeaderContent: some View {
+        HStack(spacing: 11) {
+            FluxAvatarView(
+                user: peer,
+                size: 40,
+                showOnline: true,
+                onlineOverride: backend.privacy.showOnline ? nil : false
+            )
+            VStack(alignment: .leading, spacing: 1) {
+                Text(peer?.name ?? "Flux")
+                    .font(.system(size: 16.5, weight: .bold))
+                    .foregroundStyle(FluxColors.textPrimary)
+                    .lineLimit(1)
+                subtitle
+            }
+        }
     }
 
     @ViewBuilder
@@ -273,7 +397,7 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 2) {
+                LazyVStack(spacing: 1) {
                     ForEach(Array(displayItems.enumerated()), id: \.element.id) { _, item in
                         switch item {
                         case .dayDivider(let ms):
@@ -365,6 +489,41 @@ struct ChatView: View {
             Haptics.success()
         }
         lastKnownLevel = currentLevel
+    }
+
+    // MARK: Flux Support AI
+
+    /// Flux Support AI: separate assistant chat with context, typing state
+    /// and graceful errors. The API key lives only on the proxy side
+    /// (mirrors the Android `_maybeSupportAiReply`).
+    private func maybeSupportAiReply() async {
+        guard peer?.isSupport == true else { return }
+
+        let history: [[String: String]] = backend.messagesOf(chatId)
+            .filter { !$0.isSystemMessage }
+            .map { message in
+                [
+                    "role": message.senderId == FluxUser.supportId ? "assistant" : "user",
+                    "content": message.text,
+                ]
+            }
+
+        backend.setSupportTyping(chatId, true)
+        let reply = await SupportAi.ask(history: history)
+        backend.setSupportTyping(chatId, false)
+
+        if let reply {
+            backend.postSupportReply(chatId, reply)
+        } else if !supportUnavailableNotified {
+            supportUnavailableNotified = true
+            backend.postSupportReply(
+                chatId,
+                SupportAi.available
+                    ? "ИИ-помощник временно недоступен. Опишите проблему — команда Flux ответит вручную."
+                    : "Здравствуйте! Я помощник Flux Support. ИИ-модуль сейчас отключён — опишите проблему, и команда Flux ответит вручную.",
+                system: true
+            )
+        }
     }
 }
 

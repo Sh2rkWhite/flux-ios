@@ -24,6 +24,16 @@ enum QRCodeGenerator {
     static func deepLink(fluxId: String) -> String {
         "flux://u/\(fluxId)"
     }
+
+    /// FluxCoinsBot quick-transfer payload: `flux://pay/<FLUXID>` or
+    /// `flux://pay/<FLUXID>?amount=<N>` (mirrors the Dart
+    /// `fluxPayQrPayload` — both platforms scan and generate the same codes).
+    static func payPayload(fluxId: String, amount: Int? = nil) -> String {
+        if let amount, amount > 0 {
+            return "flux://pay/\(fluxId)?amount=\(amount)"
+        }
+        return "flux://pay/\(fluxId)"
+    }
 }
 
 /// QR view with a white inset card and the FluxID caption.
@@ -200,6 +210,33 @@ enum QRCodeParser {
         let upper = trimmed.uppercased()
         return upper.matchesFluxIdPattern ? upper : nil
     }
+
+    /// Parses a FluxCoinsBot payment QR payload (`flux://pay/…`); returns
+    /// nil for anything else (mirrors the Dart `parsePayQrPayload`).
+    static func payQr(from payload: String) -> FluxPayQr? {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasPrefix("flux://pay/") else { return nil }
+        let rest = String(trimmed.dropFirst("flux://pay/".count))
+        let parts = rest.components(separatedBy: "?")
+        let fluxId = (parts.first ?? "").uppercased()
+        guard fluxId.matchesFluxIdPattern else { return nil }
+        var amount: Int?
+        if parts.count > 1 {
+            for param in parts.dropFirst().joined(separator: "?").components(separatedBy: "&") {
+                let kv = param.components(separatedBy: "=")
+                if kv.count == 2, kv[0] == "amount" {
+                    amount = Int(kv[1])
+                }
+            }
+        }
+        return FluxPayQr(fluxId: fluxId, amount: amount)
+    }
+}
+
+/// The parsed result of a FluxCoinsBot payment QR payload.
+struct FluxPayQr {
+    let fluxId: String
+    let amount: Int?
 }
 
 extension String {

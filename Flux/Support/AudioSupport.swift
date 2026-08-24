@@ -96,10 +96,39 @@ final class AudioPlayerManager: ObservableObject {
             stopPlayback()
             return
         }
+        if let path, FluxMedia.isStorageRef(path) {
+            Task { await playRemote(messageId: messageId, ref: path) }
+            return
+        }
         guard let path, let url = URL(string: path), FileManager.default.fileExists(atPath: path) else {
             stopPlayback()
             return
         }
+        startPlayback(messageId: messageId, url: url)
+    }
+
+    private func playRemote(messageId: String, ref: String) async {
+        let objectPath = FluxMedia.objectPath(of: ref)
+        let cacheDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("FluxVoiceCache", isDirectory: true)
+        let localUrl = cacheDir.appendingPathComponent(objectPath.replacingOccurrences(of: "/", with: "_"))
+        if !FileManager.default.fileExists(atPath: localUrl.path) {
+            guard let remoteUrl = await FluxMedia.downloadURL(for: ref) else { return }
+            do {
+                try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+                let (tempUrl, _) = try await URLSession.shared.download(from: remoteUrl)
+                try? FileManager.default.removeItem(at: localUrl)
+                try FileManager.default.moveItem(at: tempUrl, to: localUrl)
+            } catch {
+                print("Flux: voice download failed (\(objectPath)): \(error.localizedDescription)")
+                return
+            }
+        }
+        guard playingMessageId != messageId else { return }
+        startPlayback(messageId: messageId, url: localUrl)
+    }
+
+    private func startPlayback(messageId: String, url: URL) {
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
             try AVAudioSession.sharedInstance().setActive(true)

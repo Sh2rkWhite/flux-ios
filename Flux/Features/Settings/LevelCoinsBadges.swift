@@ -253,6 +253,14 @@ struct FluxCoinsView: View {
         case .usernameSale: return "at"
         case .dailyReward: return "flame.fill"
         case .levelUp: return "arrow.up.circle.fill"
+        case .coinsTransferSent: return "arrow.up"
+        case .coinsTransferReceived: return "arrow.down"
+        case .checkCreated: return "receipt"
+        case .checkRedeemed: return "receipt"
+        case .checkRefund: return "receipt"
+        case .p2pEscrow: return "lock.fill"
+        case .p2pReleased: return "arrow.left.arrow.right"
+        case .p2pRefund: return "lock.open.fill"
         }
     }
 }

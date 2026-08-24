@@ -15,6 +15,7 @@ enum Route: Hashable {
     case myQR
     case scanQR
     case adminPanel
+    case coinsBot(sendTo: String?, sendAmount: Int?)
     case inCall(peerId: String, video: Bool)
 }
 
@@ -23,11 +24,25 @@ enum Route: Hashable {
 struct HomeShellView: View {
     @EnvironmentObject var backend: LocalBackend
     @EnvironmentObject var l10n: FluxL10n
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var tabIndex = 0
+    @State private var chatsPath = NavigationPath()
+    @State private var callsPath = NavigationPath()
+    @State private var profilePath = NavigationPath()
 
     private var totalUnread: Int {
         backend.chats.reduce(0) { $0 + $1.unreadCount }
+    }
+
+    /// True while a destination (e.g. ChatView with its own header) is pushed
+    /// on top of the active tab root — the floating pill must not overlap it.
+    private var isPushed: Bool {
+        switch tabIndex {
+        case 0: return !chatsPath.isEmpty
+        case 1: return !callsPath.isEmpty
+        default: return !profilePath.isEmpty
+        }
     }
 
     var body: some View {
@@ -36,18 +51,21 @@ struct HomeShellView: View {
                 switch tabIndex {
                 case 0: chatsTab
                 case 1: callsTab
-                default: ProfileTabView()
+                default: ProfileTabView(path: $profilePath)
                 }
             }
-            .padding(.bottom, 84)
+            .padding(.bottom, isPushed ? 0 : 84)
 
-            navBar
+            if !isPushed {
+                navBar
+                    .transition(.opacity)
+            }
         }
         .background(FluxColors.background.ignoresSafeArea())
     }
 
     private var chatsTab: some View {
-        NavigationStack {
+        NavigationStack(path: $chatsPath) {
             ChatListView()
                 .navigationDestination(for: Route.self) { route in
                     RouteDestination(route: route)
@@ -56,7 +74,7 @@ struct HomeShellView: View {
     }
 
     private var callsTab: some View {
-        NavigationStack {
+        NavigationStack(path: $callsPath) {
             CallsView()
                 .navigationDestination(for: Route.self) { route in
                     RouteDestination(route: route)
@@ -73,10 +91,10 @@ struct HomeShellView: View {
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(FluxColors.surface.opacity(0.94))
+                .fill(Material.ultraThinMaterial)
                 .overlay(
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .strokeBorder(FluxColors.separator, lineWidth: 1)
+                        .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.12) : FluxColors.separator, lineWidth: 1)
                 )
                 .shadow(color: Color(hex: 0x1A2340).opacity(0.1), radius: 24, y: 8)
         )
@@ -159,6 +177,8 @@ struct RouteDestination: View {
             QRScannerView()
         case .adminPanel:
             AdminPanelView()
+        case .coinsBot(let sendTo, let sendAmount):
+            CoinsBotView(sendTo: sendTo, sendAmount: sendAmount)
         case .inCall(let peerId, let video):
             InCallView(peerId: peerId, video: video)
         }

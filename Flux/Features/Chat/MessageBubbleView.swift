@@ -6,6 +6,7 @@ import SwiftUI
 struct MessageBubbleView: View {
     @EnvironmentObject var backend: LocalBackend
     @EnvironmentObject var l10n: FluxL10n
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var audioPlayer = AudioPlayerManager.shared
 
     let message: FluxMessage
@@ -19,6 +20,12 @@ struct MessageBubbleView: View {
         isMine ? AnyShapeStyle(FluxColors.gradient) : AnyShapeStyle(FluxColors.surface)
     }
 
+    /// Voice bubbles render on a liquid-glass material, so text/icon contrast
+    /// follows the system color scheme instead of the `isMine` flag.
+    private var onDarkBubble: Bool {
+        message.kind == .voice ? colorScheme == .dark : isMine
+    }
+
     var body: some View {
         Group {
             if message.isSystemMessage {
@@ -27,7 +34,7 @@ struct MessageBubbleView: View {
                 regularBubble
             }
         }
-        .padding(.top, showTopGap ? 10 : 2)
+        .padding(.top, showTopGap ? 7 : 1)
     }
 
     // MARK: Regular bubble
@@ -52,13 +59,22 @@ struct MessageBubbleView: View {
     }
 
     private var bubbleShape: some View {
-        RoundedCorners(
+        let shape = RoundedCorners(
             radius: 20,
             tailCorner: isMine ? .br : .bl,
             showTail: showTail
         )
-        .fill(bubbleColor)
-        .shadow(color: Color(hex: 0x1A2340).opacity(isMine ? 0 : 0.05), radius: 10, y: 3)
+        let isGlass = message.kind == .voice
+        return shape
+            .fill(isGlass ? AnyShapeStyle(Material.ultraThinMaterial) : bubbleColor)
+            .overlay(
+                Group {
+                    if isGlass {
+                        shape.stroke(Color.white.opacity(0.35), lineWidth: 1)
+                    }
+                }
+            )
+            .shadow(color: Color(hex: 0x1A2340).opacity(isMine ? 0 : 0.05), radius: 10, y: 3)
     }
 
     @ViewBuilder
@@ -71,7 +87,7 @@ struct MessageBubbleView: View {
             metaRow
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .padding(EdgeInsets(top: message.kind == .image ? 5 : 9, leading: 14, bottom: message.kind == .image ? 8 : 9, trailing: 14))
+        .padding(EdgeInsets(top: message.kind == .image ? 4 : 6, leading: 14, bottom: message.kind == .image ? 5 : 6, trailing: 14))
     }
 
     @ViewBuilder
@@ -79,18 +95,18 @@ struct MessageBubbleView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(replyPreviewText(original))
                 .font(.system(size: 13))
-                .foregroundStyle(isMine ? .white.opacity(0.85) : FluxColors.textPrimary)
+                .foregroundStyle(onDarkBubble ? .white.opacity(0.85) : FluxColors.textPrimary)
                 .lineLimit(2)
         }
         .padding(EdgeInsets(top: 7, leading: 10, bottom: 7, trailing: 10))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isMine ? Color.white.opacity(0.14) : FluxColors.blue.opacity(0.14))
+                .fill(onDarkBubble ? Color.white.opacity(0.14) : FluxColors.blue.opacity(0.14))
         )
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 2)
-                .fill(isMine ? Color.white.opacity(0.7) : FluxColors.blue)
+                .fill(onDarkBubble ? Color.white.opacity(0.7) : FluxColors.blue)
                 .frame(width: 3)
                 .padding(.vertical, 4)
         }
@@ -128,7 +144,12 @@ struct MessageBubbleView: View {
 
     @ViewBuilder
     private var imagePayload: some View {
-        if let path = message.mediaPath, let image = UIImage(contentsOfFile: path) {
+        if let path = message.mediaPath, FluxMedia.isStorageRef(path) {
+            RemoteMediaImage(path: path) { imagePlaceholder }
+                .frame(width: 220, height: 220)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .clipped()
+        } else if let path = message.mediaPath, let image = UIImage(contentsOfFile: path) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
@@ -136,20 +157,24 @@ struct MessageBubbleView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .clipped()
         } else {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(FluxColors.surfaceGray)
-                .frame(width: 220, height: 160)
-                .overlay(
-                    VStack(spacing: 8) {
-                        Image(systemName: "photo")
-                            .font(.system(size: 26))
-                            .foregroundStyle(FluxColors.textTertiary)
-                        Text("Фото недоступно")
-                            .font(.system(size: 12))
-                            .foregroundStyle(FluxColors.textTertiary)
-                    }
-                )
+            imagePlaceholder
         }
+    }
+
+    private var imagePlaceholder: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(FluxColors.surfaceGray)
+            .frame(width: 220, height: 160)
+            .overlay(
+                VStack(spacing: 8) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 26))
+                        .foregroundStyle(FluxColors.textTertiary)
+                    Text("Фото недоступно")
+                        .font(.system(size: 12))
+                        .foregroundStyle(FluxColors.textTertiary)
+                }
+            )
     }
 
     private var voicePayload: some View {
@@ -161,11 +186,11 @@ struct MessageBubbleView: View {
             } label: {
                 ZStack {
                     Circle()
-                        .fill(isMine ? Color.white.opacity(0.22) : FluxColors.blueSoft)
+                        .fill(onDarkBubble ? Color.white.opacity(0.22) : FluxColors.blueSoft)
                         .frame(width: 38, height: 38)
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 15))
-                        .foregroundStyle(isMine ? .white : FluxColors.blue)
+                        .foregroundStyle(onDarkBubble ? .white : FluxColors.blue)
                 }
             }
             .buttonStyle(ScaleButtonStyle(scale: 0.9))
@@ -174,16 +199,16 @@ struct MessageBubbleView: View {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill((isMine ? Color.white : FluxColors.textPrimary).opacity(0.18))
+                            .fill((onDarkBubble ? Color.white : FluxColors.textPrimary).opacity(0.18))
                         Capsule()
-                            .fill(isMine ? Color.white : FluxColors.blue)
+                            .fill(onDarkBubble ? Color.white : FluxColors.blue)
                             .frame(width: max(6, geometry.size.width * (isPlaying ? audioPlayer.progress : 0.02)))
                     }
                 }
                 .frame(width: 110, height: 4)
                 Text(formatDurationMs(isPlaying && audioPlayer.currentDurationMs > 0 ? Int(Double(audioPlayer.currentDurationMs) * audioPlayer.progress) : message.voiceDurationMs))
                     .font(.system(size: 11.5).monospacedDigit())
-                    .foregroundStyle(isMine ? Color.white.opacity(0.8) : FluxColors.textSecondary)
+                    .foregroundStyle(onDarkBubble ? Color.white.opacity(0.8) : FluxColors.textSecondary)
             }
         }
     }
@@ -219,29 +244,37 @@ struct MessageBubbleView: View {
             if message.expiresAtMs != nil {
                 Image(systemName: "timer")
                     .font(.system(size: 10))
-                    .foregroundStyle(isMine ? Color.white.opacity(0.7) : FluxColors.textTertiary)
+                    .foregroundStyle(onDarkBubble ? Color.white.opacity(0.7) : FluxColors.textTertiary)
             }
             if message.isEdited {
                 Text("изм.")
                     .font(.system(size: 11))
-                    .foregroundStyle(isMine ? Color.white.opacity(0.7) : FluxColors.textTertiary)
+                    .foregroundStyle(onDarkBubble ? Color.white.opacity(0.7) : FluxColors.textTertiary)
             }
             Text(formatTime(message.sentAtMs))
                 .font(.system(size: 11.5).monospacedDigit())
-                .foregroundStyle(isMine ? Color.white.opacity(0.75) : FluxColors.textSecondary)
+                .foregroundStyle(onDarkBubble ? Color.white.opacity(0.75) : FluxColors.textSecondary)
             if isMine {
                 Image(systemName: message.isRead ? "checkmark" : "checkmark")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(message.isRead ? Color(hex: 0xB7FFD9) : Color.white.opacity(0.65))
+                    .foregroundStyle(message.isRead ? readCheckColor : unreadCheckColor)
                 if message.isRead {
                     Image(systemName: "checkmark")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color(hex: 0xB7FFD9))
+                        .foregroundStyle(readCheckColor)
                         .offset(x: -7)
                 }
             }
         }
-        .padding(.top, 3)
+        .padding(.top, 2)
+    }
+
+    private var readCheckColor: Color {
+        message.kind == .voice ? Color(light: 0x2EA36B, dark: 0xB7FFD9) : Color(hex: 0xB7FFD9)
+    }
+
+    private var unreadCheckColor: Color {
+        message.kind == .voice ? Color(light: 0x9AA3B8, dark: 0xFFFFFF).opacity(0.75) : Color.white.opacity(0.65)
     }
 
     // MARK: Reactions

@@ -318,7 +318,7 @@ struct SmartAuthView: View {
             do {
                 let loggedIn = try await backend.loginSmart(username: user.username ?? username, password: password)
                 saveToVault(loggedIn, password: password)
-                await backend.saveBiometricLogin(user.username ?? username)
+                await backend.saveBiometricLogin(user.username ?? username, password: password)
                 busy = false
             } catch {
                 busy = false
@@ -342,7 +342,7 @@ struct SmartAuthView: View {
                     displayName: displayName
                 )
                 saveToVault(user, password: password)
-                await backend.saveBiometricLogin(username)
+                await backend.saveBiometricLogin(username, password: password)
                 busy = false
             } catch {
                 busy = false

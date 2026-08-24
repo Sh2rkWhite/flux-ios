@@ -450,25 +450,34 @@ struct FluxAvatarView: View {
     var onlineOverride: Bool? = nil
 
     private var image: UIImage? {
-        guard let path = user?.avatarPath else { return nil }
+        guard let path = user?.avatarPath, !FluxMedia.isStorageRef(path) else { return nil }
         return UIImage(contentsOfFile: path)
+    }
+
+    private var initialsLabel: some View {
+        let emoji = user?.isSupport == true ? "💙" : (user?.isCoinsBot == true ? "🪙" : nil)
+        return Text(emoji ?? initialsOf(user?.name ?? "F"))
+            .font(.system(size: emoji != nil ? size * 0.42 : size * 0.36, weight: .semibold))
+            .foregroundStyle(.white)
+            .minimumScaleFactor(0.5)
     }
 
     var body: some View {
         ZStack {
             Circle()
                 .fill(FluxColors.avatarGradient(user?.fluxId ?? user?.id ?? "flux"))
-            if let image {
+            if let path = user?.avatarPath, FluxMedia.isStorageRef(path) {
+                RemoteMediaImage(path: path) { initialsLabel }
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+            } else if let image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
                     .frame(width: size, height: size)
                     .clipShape(Circle())
             } else {
-                Text(user?.isSupport == true ? "💙" : initialsOf(user?.name ?? "F"))
-                    .font(.system(size: user?.isSupport == true ? size * 0.42 : size * 0.36, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .minimumScaleFactor(0.5)
+                initialsLabel
             }
         }
         .frame(width: size, height: size)
@@ -495,19 +504,25 @@ struct FluxBannerView: View {
     var height: CGFloat = 200
 
     private var image: UIImage? {
-        guard let bannerPath else { return nil }
+        guard let bannerPath, !FluxMedia.isStorageRef(bannerPath) else { return nil }
         return UIImage(contentsOfFile: bannerPath)
+    }
+
+    private var gradient: some View {
+        Rectangle()
+            .fill(FluxColors.bannerGradient(user?.fluxId ?? "flux"))
     }
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            if let image {
+            if let bannerPath, FluxMedia.isStorageRef(bannerPath) {
+                RemoteMediaImage(path: bannerPath) { gradient }
+            } else if let image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
             } else {
-                Rectangle()
-                    .fill(FluxColors.bannerGradient(user?.fluxId ?? "flux"))
+                gradient
             }
             LinearGradient(
                 colors: [.clear, .black.opacity(0.35)],

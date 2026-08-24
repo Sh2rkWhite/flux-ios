@@ -143,6 +143,7 @@ struct StoriesGiftsSignaturesTabs: View {
     @State private var tab = 0
     @State private var badgeDetail: FluxBadge?
     @State private var giftDetail: FluxGift?
+    @State private var showStoryComposer = false
 
     private var liveStories: [FluxStory] {
         profile.stories.filter { !$0.isExpired }
@@ -181,6 +182,9 @@ struct StoriesGiftsSignaturesTabs: View {
             GiftDetailSheet(gift: gift)
                 .presentationDetents([.medium])
         }
+        .sheet(isPresented: $showStoryComposer) {
+            StoryComposerSheet()
+        }
     }
 
     private func tabButton(title: String, count: Int, index: Int) -> some View {
@@ -218,11 +222,24 @@ struct StoriesGiftsSignaturesTabs: View {
     private var storiesTab: some View {
         if !profile.visibility.showStories {
             tabEmptyState(emoji: "🙈", title: "Истории скрыты")
-        } else if liveStories.isEmpty {
+        } else if liveStories.isEmpty && !isOwnProfile {
             tabEmptyState(emoji: "📖", title: "Нет активных историй", hint: "Истории появятся здесь")
+        } else if liveStories.isEmpty {
+            VStack(spacing: 12) {
+                Text("📖")
+                    .font(.system(size: 30))
+                Text("Нет активных историй")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(FluxColors.textPrimary)
+                createStoryButton
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
+                    if isOwnProfile {
+                        addStoryTile
+                    }
                     ForEach(Array(liveStories.enumerated()), id: \.element.id) { index, story in
                         Button {
                             Haptics.light()
@@ -250,14 +267,57 @@ struct StoriesGiftsSignaturesTabs: View {
         }
     }
 
+    private var addStoryTile: some View {
+        Button {
+            Haptics.light()
+            showStoryComposer = true
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: "plus")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(FluxColors.blue)
+                Text("Создать")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(FluxColors.textSecondary)
+            }
+            .frame(width: 120, height: 200)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(FluxColors.blueSoft)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(FluxColors.blue.opacity(0.35), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                    )
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+
+    private var createStoryButton: some View {
+        Button {
+            Haptics.light()
+            showStoryComposer = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus.circle.fill")
+                Text("Создать историю")
+            }
+            .font(.system(size: 14, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background(
+                Capsule().fill(FluxColors.gradient)
+                    .shadow(color: FluxColors.blue.opacity(0.3), radius: 8, y: 3)
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+
     @ViewBuilder
     private func storyThumb(_ story: FluxStory) -> some View {
         ZStack(alignment: .bottomLeading) {
-            if let image = UIImage(contentsOfFile: story.mediaPath) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
+            RemoteMediaImage(path: story.mediaPath) {
                 Rectangle().fill(FluxColors.gradient)
             }
             if let caption = story.caption {
@@ -611,5 +671,121 @@ struct GiftDetailSheet: View {
         }
         .padding(.horizontal, 24)
         .background(FluxColors.background.ignoresSafeArea())
+    }
+}
+
+// MARK: - Story composer
+
+/// «Новая история» composer: photo from gallery/camera + optional caption,
+/// published through `backend.publishStory` into `myProfile.stories`.
+struct StoryComposerSheet: View {
+    @EnvironmentObject var backend: LocalBackend
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var imagePath: String?
+    @State private var caption = ""
+    @State private var publishing = false
+    @State private var showSourceSheet = false
+    @State private var showGallery = false
+    @State private var showCamera = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Capsule().fill(FluxColors.separator).frame(width: 40, height: 4).padding(.top, 10)
+
+            Text("Новая история")
+                .font(.system(size: 18, weight: .heavy))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(EdgeInsets(top: 18, leading: 0, bottom: 14, trailing: 0))
+
+            if let imagePath, let image = UIImage(contentsOfFile: imagePath) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 300)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(alignment: .topTrailing) {
+                        Button {
+                            Haptics.light()
+                            showSourceSheet = true
+                        } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 32, height: 32)
+                                .background(Circle().fill(Color.black.opacity(0.45)))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(10)
+                    }
+            } else {
+                Button {
+                    Haptics.light()
+                    showSourceSheet = true
+                } label: {
+                    VStack(spacing: 10) {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.system(size: 30))
+                            .foregroundStyle(FluxColors.blue)
+                        Text("Добавить фото")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(FluxColors.textPrimary)
+                        Text("Галерея или камера")
+                            .font(.system(size: 13))
+                            .foregroundStyle(FluxColors.textTertiary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 300)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(FluxColors.blueSoft)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .strokeBorder(FluxColors.blue.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, dash: [7, 5]))
+                            )
+                    )
+                }
+                .buttonStyle(ScaleButtonStyle(scale: 0.99))
+            }
+
+            FluxTextField(text: $caption, hint: "Подпись (необязательно)")
+                .padding(.top, 14)
+
+            FluxButton(title: "Опубликовать", enabled: imagePath != nil, showsProgress: publishing) {
+                publish()
+            }
+            .padding(.top, 14)
+
+            Spacer(minLength: 12)
+        }
+        .padding(.horizontal, 20)
+        .background(FluxColors.background.ignoresSafeArea())
+        .confirmationDialog("Источник фото", isPresented: $showSourceSheet, titleVisibility: .visible) {
+            Button("Галерея") { showGallery = true }
+            Button("Камера") { showCamera = true }
+            Button("Отмена", role: .cancel) {}
+        }
+        .sheet(isPresented: $showGallery) {
+            PhotoLibraryPicker { data in
+                imagePath = FluxMediaStore.saveImage(data, prefix: "story")
+            }
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPicker { data in
+                imagePath = FluxMediaStore.saveImage(data, prefix: "story")
+            }
+        }
+    }
+
+    private func publish() {
+        guard let imagePath, !publishing else { return }
+        publishing = true
+        Task {
+            let trimmed = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+            await backend.publishStory(mediaPath: imagePath, caption: trimmed)
+            publishing = false
+            dismiss()
+        }
     }
 }

@@ -121,7 +121,7 @@ struct ChatTileView: View {
             )
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(peer?.name ?? "Flux")
+                    Text(peer?.isFrozen == true ? "❄️ \(peer?.name ?? "Flux")" : (peer?.name ?? "Flux"))
                         .font(.system(size: 16.5, weight: peer?.isSupport == true ? .bold : .semibold))
                         .foregroundStyle(FluxColors.textPrimary)
                         .lineLimit(1)
@@ -183,6 +183,7 @@ struct NewChatSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""
+    @State private var toast: Toast?
     private let onOpenChat: (String) -> Void
 
     init(onOpenChat: @escaping (String) -> Void) {
@@ -282,6 +283,7 @@ struct NewChatSheet: View {
             }
             .background(FluxColors.background.ignoresSafeArea())
             .navigationBarHidden(true)
+            .fluxToast($toast)
         }
         .presentationDetents([.large, .medium])
         .presentationDragIndicator(.hidden)
@@ -324,6 +326,16 @@ struct NewChatSheet: View {
     }
 
     private func openChat(_ user: FluxUser) async {
+        if backend.chatWithPeer(user.id) == nil {
+            if backend.me?.isFrozen == true {
+                toast = Toast(text: "❄️ Аккаунт заморожен — изменения недоступны.")
+                return
+            }
+            if backend.me?.isMuted == true {
+                toast = Toast(text: "Вы не можете начать новые диалоги.")
+                return
+            }
+        }
         let chat = await backend.openChatWithUser(user)
         dismiss()
         // Give the sheet a beat to dismiss before pushing the chat.
@@ -349,7 +361,7 @@ struct ContactRow: View {
             )
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(user.name)
+                    Text(user.isFrozen ? "❄️ \(user.name)" : user.name)
                         .font(.system(size: 15.5, weight: .semibold))
                         .foregroundStyle(FluxColors.textPrimary)
                         .lineLimit(1)

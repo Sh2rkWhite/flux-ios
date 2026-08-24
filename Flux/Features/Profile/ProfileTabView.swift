@@ -11,11 +11,18 @@ struct ProfileTabView: View {
     @State private var showLogoutConfirm = false
     @State private var showLanguageSheet = false
     @State private var showThemeSheet = false
+    @State private var showPremiumSheet = false
     @State private var toast: Toast?
     @State private var pushSupportChat = false
+    @State private var internalPath = NavigationPath()
+
+    /// Navigation path of this tab's stack. HomeShellView passes a binding so
+    /// it can hide the floating pill while a screen is pushed; default keeps
+    /// the internal state when the view is used standalone.
+    var path: Binding<NavigationPath>? = nil
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: path ?? $internalPath) {
             ScrollView {
                 VStack(spacing: 0) {
                     headerCard
@@ -35,6 +42,15 @@ struct ProfileTabView: View {
                 RouteDestination(route: route)
             }
             .fluxToast($toast)
+            .sheet(isPresented: $showPremiumSheet) {
+                PremiumSheet {
+                    Task {
+                        _ = await backend.openChatWithUser(backend.ensureSupportUser())
+                        pushSupportChat = true
+                    }
+                }
+                .presentationDetents([.fraction(0.72), .large])
+            }
         }
     }
 
@@ -110,8 +126,8 @@ struct ProfileTabView: View {
 
     private var premiumBanner: some View {
         Button {
-            Haptics.success()
-            Task { await backend.updateMe(isPremium: !(backend.me?.isPremium ?? false)) }
+            Haptics.light()
+            showPremiumSheet = true
         } label: {
             HStack(spacing: 12) {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)

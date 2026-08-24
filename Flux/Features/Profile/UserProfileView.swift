@@ -8,7 +8,9 @@ struct UserProfileView: View {
     @EnvironmentObject var l10n: FluxL10n
     @Environment(\.dismiss) private var dismiss
 
-    /// `nil` / empty = the own profile.
+    /// `nil` = the own profile. An empty or unknown id is NOT treated as own —
+    /// the view shows the «Пользователь не найден» placeholder instead
+    /// (fixes the bug where the own profile opened instead of the peer's).
     let userId: String?
 
     @State private var showGiftCatalog = false
@@ -21,9 +23,14 @@ struct UserProfileView: View {
     @State private var toast: Toast?
     @State private var sentGift: FluxGift?
     @State private var pushChatId: String?
+    @State private var moderationTarget: FluxUser?
+    @State private var badgeDetail: FluxBadge?
+    /// On-demand peer resolution state (mirrors the Dart `_resolveUser`).
+    @State private var resolvingUser = false
+    @State private var userResolveFailed = false
 
     private var isOwnProfile: Bool {
-        guard let userId, !userId.isEmpty else { return true }
+        guard let userId, !userId.isEmpty else { return userId == nil }
         return userId == backend.me?.id
     }
 
@@ -45,6 +52,11 @@ struct UserProfileView: View {
         Group {
             if let user {
                 content(user: user, profile: profile)
+            } else if resolvingUser {
+                // The contact is not cached locally yet — load the real user
+                // data from the shared backend instead of dead-ending.
+                ProgressView()
+                    .tint(FluxColors.blue)
             } else {
                 Text("Пользователь не найден")
                     .font(.system(size: 16, weight: .semibold))
@@ -55,6 +67,24 @@ struct UserProfileView: View {
         .navigationBarHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .fluxToast($toast)
+        .onAppear { resolveUserIfNeeded() }
+    }
+
+    /// Fetches the real user document from the shared backend when the
+    /// contact is not cached locally yet (e.g. the profile was opened from a
+    /// chat whose peer has not been pulled into the directory). Mirrors the
+    /// Dart `_resolveUser`.
+    private func resolveUserIfNeeded() {
+        guard !isOwnProfile, let userId, !userId.isEmpty else { return }
+        guard user == nil, !resolvingUser, !userResolveFailed else { return }
+        resolvingUser = true
+        Task {
+            let fetched = await backend.ensureUser(userId)
+            resolvingUser = false
+            if fetched == nil {
+                userResolveFailed = true
+            }
+        }
     }
 
     // MARK: Content
@@ -65,8 +95,10 @@ struct UserProfileView: View {
                 bannerSection(user: user)
                 headerSection(user: user, profile: profile)
                 if !profile.displayBadges.isEmpty && profile.visibility.showBadges {
-                    BadgeRowView(badges: profile.displayBadges)
-                        .padding(.top, 14)
+                    BadgeRowView(badges: profile.displayBadges) { badge in
+                        badgeDetail = badge
+                    }
+                    .padding(.top, 14)
                 }
                 xpCard(profile: profile)
                     .padding(.top, 14)
@@ -116,6 +148,14 @@ struct UserProfileView: View {
                 Spacer()
             }
             .presentationDetents([.medium])
+        }
+        .sheet(item: $moderationTarget) { target in
+            ModerationSheet(user: target)
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(item: $badgeDetail) { badge in
+            BadgeDetailSheet(badge: badge)
+                .presentationDetents([.medium])
         }
         .fullScreenCover(isPresented: $showStoriesViewer) {
             StoriesViewer(
@@ -173,8 +213,12 @@ struct UserProfileView: View {
         .padding(.top, 8)
         .sheet(isPresented: $showMoreMenu) {
             moreMenuSheet(user: user)
-                .presentationDetents([.height(280)])
+                .presentationDetents([.height(moreMenuHeight)])
         }
+    }
+
+    private var moreMenuHeight: CGFloat {
+        !isOwnProfile && backend.me?.isAdmin == true ? 340 : 280
     }
 
     private func circleButton(systemImage: String) -> some View {
@@ -196,6 +240,21 @@ struct UserProfileView: View {
                     .padding(.horizontal, 8)
             }
             if !isOwnProfile {
+                if backend.me?.isAdmin == true {
+                    Button {
+                        moderationTarget = user
+                        showMoreMenu = false
+                    } label: {
+                        FluxSettingsTile(
+                            icon: "gavel",
+                            title: "Модерация (Mute / Freeze)",
+                            iconColor: FluxColors.warning,
+                            iconBackground: FluxColors.warning.opacity(0.12)
+                        )
+                        .padding(.horizontal, 8)
+                    }
+                    .buttonStyle(.plain)
+                }
                 Button {
                     showTheirQR = true
                     showMoreMenu = false
@@ -306,6 +365,16 @@ struct UserProfileView: View {
                 Button {
                     Haptics.light()
                     Task {
+                        if backend.chatWithPeer(user.id) == nil {
+                            if backend.me?.isFrozen == true {
+                                toast = Toast(text: "❄️ Аккаунт заморожен — изменения недоступны.")
+                                return
+                            }
+                            if backend.me?.isMuted == true {
+                                toast = Toast(text: "Вы не можете начать новые диалоги.")
+                                return
+                            }
+                        }
                         let chat = await backend.openChatWithUser(user)
                         pushChatId = chat.id
                     }

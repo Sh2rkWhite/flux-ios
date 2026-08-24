@@ -88,6 +88,7 @@ struct QRScannerView: View {
 
     @State private var isScanningEnabled = true
     @State private var scannedUserId: String?
+    @State private var scannedPay: FluxPayQr?
     @State private var invalidToast: Toast?
 
     var body: some View {
@@ -125,12 +126,27 @@ struct QRScannerView: View {
                 UserProfileView(userId: userId)
             }
         }
+        .navigationDestination(isPresented: Binding(
+            get: { scannedPay != nil },
+            set: { if !$0 { scannedPay = nil } }
+        )) {
+            if let pay = scannedPay {
+                CoinsBotView(sendTo: pay.fluxId, sendAmount: pay.amount)
+            }
+        }
     }
 
     private func handleScan(_ payload: String) {
         guard isScanningEnabled else { return }
         isScanningEnabled = false
         Haptics.success()
+
+        // FluxCoinsBot quick-transfer QR → open the bot with prefill.
+        if let pay = QRCodeParser.payQr(from: payload) {
+            scannedPay = pay
+            isScanningEnabled = true
+            return
+        }
 
         guard let fluxId = QRCodeParser.fluxId(from: payload) else {
             invalidToast = Toast(text: "QR-код недействителен", isError: true)

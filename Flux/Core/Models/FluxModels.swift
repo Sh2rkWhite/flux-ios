@@ -29,13 +29,28 @@ struct FluxUser: Identifiable, Equatable, Codable {
     /// Optional email collected at registration. Local-only.
     var email: String?
 
+    /// Moderation: muted until (epoch ms, 0 = not muted). Muted users
+    /// cannot start NEW conversations but keep chatting in existing ones.
+    var mutedUntilMs: Int
+    /// Moderation: frozen until (epoch ms, 0 = not frozen). Frozen users
+    /// are read-only.
+    var frozenUntilMs: Int
+    var mutedReason: String?
+    var frozenReason: String?
+
+    var isMuted: Bool { mutedUntilMs > Int(Date().timeIntervalSince1970 * 1000) }
+    var isFrozen: Bool { frozenUntilMs > Int(Date().timeIntervalSince1970 * 1000) }
+
     static let supportId = "flux-support"
     static let securityBotId = "flux-security"
     /// Sender id used when the security bot posts a system notification.
     static let systemSecurityBotId = "system_security_bot"
+    /// Fixed id of the Flux Coins bot (@FluxCoinsBot).
+    static let coinsBotId = "flux-coins-bot"
 
     var isSupport: Bool { id == FluxUser.supportId }
     var isSecurityBot: Bool { id == FluxUser.securityBotId }
+    var isCoinsBot: Bool { id == FluxUser.coinsBotId }
 
     init(
         id: String,
@@ -52,7 +67,11 @@ struct FluxUser: Identifiable, Equatable, Codable {
         registeredAtMs: Int? = nil,
         isVerified: Bool = false,
         passwordHash: String? = nil,
-        email: String? = nil
+        email: String? = nil,
+        mutedUntilMs: Int = 0,
+        frozenUntilMs: Int = 0,
+        mutedReason: String? = nil,
+        frozenReason: String? = nil
     ) {
         self.id = id
         self.fluxId = fluxId
@@ -69,6 +88,42 @@ struct FluxUser: Identifiable, Equatable, Codable {
         self.isVerified = isVerified
         self.passwordHash = passwordHash
         self.email = email
+        self.mutedUntilMs = mutedUntilMs
+        self.frozenUntilMs = frozenUntilMs
+        self.mutedReason = mutedReason
+        self.frozenReason = frozenReason
+    }
+
+    // Custom Codable so documents persisted before the moderation fields
+    // existed still decode correctly (missing keys default to 0/nil).
+    private enum CodingKeys: String, CodingKey {
+        case id, fluxId, name, username, status, avatarPath, isPremium,
+             isOnline, lastSeenMs, isAdmin, sessions, registeredAtMs,
+             isVerified, passwordHash, email,
+             mutedUntilMs, frozenUntilMs, mutedReason, frozenReason
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        fluxId = try c.decode(String.self, forKey: .fluxId)
+        name = try c.decode(String.self, forKey: .name)
+        username = try c.decodeIfPresent(String.self, forKey: .username)
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        avatarPath = try c.decodeIfPresent(String.self, forKey: .avatarPath)
+        isPremium = try c.decodeIfPresent(Bool.self, forKey: .isPremium) ?? false
+        isOnline = try c.decodeIfPresent(Bool.self, forKey: .isOnline) ?? false
+        lastSeenMs = try c.decodeIfPresent(Int.self, forKey: .lastSeenMs)
+        isAdmin = try c.decodeIfPresent(Bool.self, forKey: .isAdmin) ?? false
+        sessions = try c.decodeIfPresent([DeviceSession].self, forKey: .sessions) ?? []
+        registeredAtMs = try c.decodeIfPresent(Int.self, forKey: .registeredAtMs)
+        isVerified = try c.decodeIfPresent(Bool.self, forKey: .isVerified) ?? false
+        passwordHash = try c.decodeIfPresent(String.self, forKey: .passwordHash)
+        email = try c.decodeIfPresent(String.self, forKey: .email)
+        mutedUntilMs = try c.decodeIfPresent(Int.self, forKey: .mutedUntilMs) ?? 0
+        frozenUntilMs = try c.decodeIfPresent(Int.self, forKey: .frozenUntilMs) ?? 0
+        mutedReason = try c.decodeIfPresent(String.self, forKey: .mutedReason)
+        frozenReason = try c.decodeIfPresent(String.self, forKey: .frozenReason)
     }
 
     // ── JSON (identical keys to the Android implementation) ────────────
@@ -84,6 +139,8 @@ struct FluxUser: Identifiable, Equatable, Codable {
             "isAdmin": isAdmin,
             "sessions": sessions.map { $0.toJson() },
             "isVerified": isVerified,
+            "mutedUntilMs": mutedUntilMs,
+            "frozenUntilMs": frozenUntilMs,
         ]
         json["username"] = username
         if let avatarPath { json["avatarPath"] = avatarPath }
@@ -91,6 +148,8 @@ struct FluxUser: Identifiable, Equatable, Codable {
         if let registeredAtMs { json["registeredAtMs"] = registeredAtMs }
         if let passwordHash { json["passwordHash"] = passwordHash }
         if let email { json["email"] = email }
+        if let mutedReason { json["mutedReason"] = mutedReason }
+        if let frozenReason { json["frozenReason"] = frozenReason }
         return json
     }
 
@@ -110,7 +169,11 @@ struct FluxUser: Identifiable, Equatable, Codable {
             registeredAtMs: (json["registeredAtMs"] as? NSNumber)?.intValue,
             isVerified: json["isVerified"] as? Bool ?? false,
             passwordHash: json["passwordHash"] as? String,
-            email: json["email"] as? String
+            email: json["email"] as? String,
+            mutedUntilMs: (json["mutedUntilMs"] as? NSNumber)?.intValue ?? 0,
+            frozenUntilMs: (json["frozenUntilMs"] as? NSNumber)?.intValue ?? 0,
+            mutedReason: json["mutedReason"] as? String,
+            frozenReason: json["frozenReason"] as? String
         )
     }
 }

@@ -90,7 +90,8 @@ struct ChatInputBar: View {
         .background(
             VStack(spacing: 0) {
                 Divider().overlay(FluxColors.separator.opacity(0.5))
-                FluxColors.surface
+                Rectangle()
+                    .fill(Material.ultraThinMaterial)
             }
             .ignoresSafeArea(edges: .bottom)
         )
@@ -205,7 +206,7 @@ struct RecordingBar: View {
         )
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(FluxColors.surface)
+        .background(Material.ultraThinMaterial)
         .onAppear { pulse = true }
     }
 }

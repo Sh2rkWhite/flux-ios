@@ -417,6 +417,8 @@ struct FluxGift: Identifiable, Equatable, Codable {
 
 enum CoinTransactionType: String, Codable, CaseIterable {
     case bonus, giftSent, giftReceived, badgePurchase, usernamePurchase, usernameSale, dailyReward, levelUp
+    case coinsTransferSent, coinsTransferReceived, checkCreated, checkRedeemed, checkRefund
+    case p2pEscrow, p2pReleased, p2pRefund
 
     var label: String {
         switch self {
@@ -428,6 +430,14 @@ enum CoinTransactionType: String, Codable, CaseIterable {
         case .usernameSale: return "Продажа username"
         case .dailyReward: return "Ежедневная награда"
         case .levelUp: return "Повышение уровня"
+        case .coinsTransferSent: return "Перевод Flux Coins"
+        case .coinsTransferReceived: return "Входящий перевод"
+        case .checkCreated: return "Чек создан"
+        case .checkRedeemed: return "Чек получен"
+        case .checkRefund: return "Возврат по чеку"
+        case .p2pEscrow: return "P2P: блокировка"
+        case .p2pReleased: return "P2P: получение"
+        case .p2pRefund: return "P2P: возврат"
         }
     }
 }

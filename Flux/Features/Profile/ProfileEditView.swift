@@ -88,6 +88,10 @@ struct ProfileEditView: View {
             ZStack {
                 if let pendingBanner, let image = UIImage(data: pendingBanner) {
                     Image(uiImage: image).resizable().scaledToFill()
+                } else if let path = backend.myProfile.bannerPath, FluxMedia.isStorageRef(path) {
+                    RemoteMediaImage(path: path) {
+                        FluxBannerView(user: backend.me, bannerPath: nil, height: 180)
+                    }
                 } else if let path = backend.myProfile.bannerPath, let image = UIImage(contentsOfFile: path) {
                     Image(uiImage: image).resizable().scaledToFill()
                 } else {

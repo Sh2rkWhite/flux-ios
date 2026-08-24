@@ -108,6 +108,7 @@ struct RootView: View {
     @EnvironmentObject var backend: LocalBackend
     @EnvironmentObject var lock: LockController
     @EnvironmentObject var env: AppEnvironment
+    @EnvironmentObject var theme: ThemeController
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -132,6 +133,9 @@ struct RootView: View {
                 }
             }
         }
+        // The theme controller is observed here directly, so switching
+        // light/dark/system re-renders the root and applies immediately.
+        .preferredColorScheme(theme.mode.colorScheme)
         .animation(FluxMotion.slowDecelAnimation, value: stage)
         .onChange(of: scenePhase) { phase in
             // Re-lock when the app leaves the foreground.

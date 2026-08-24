@@ -207,6 +207,7 @@ struct AdminPanelView: View {
 
     @State private var amountText = ""
     @State private var toast: Toast?
+    @State private var moderationTarget: FluxUser?
 
     var body: some View {
         ScrollView {
@@ -223,6 +224,10 @@ struct AdminPanelView: View {
         .navigationTitle(l10n.adminPanel)
         .navigationBarTitleDisplayMode(.inline)
         .fluxToast($toast)
+        .sheet(item: $moderationTarget) { user in
+            ModerationSheet(user: user)
+                .presentationDetents([.medium, .large])
+        }
     }
 
     private var statsCard: some View {
@@ -379,6 +384,20 @@ struct AdminPanelView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(Capsule().fill(FluxColors.online.opacity(0.12)))
+                    }
+                    if backend.me?.isAdmin == true, user.id != backend.me?.id {
+                        Button {
+                            Haptics.medium()
+                            moderationTarget = user
+                        } label: {
+                            Image(systemName: "gavel")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(FluxColors.textSecondary)
+                                .frame(width: 32, height: 32)
+                                .background(Circle().fill(FluxColors.surfaceGray))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Модерация")
                     }
                 }
                 .padding(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 14))

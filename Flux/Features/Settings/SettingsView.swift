@@ -6,8 +6,11 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var backend: LocalBackend
     @EnvironmentObject var l10n: FluxL10n
+    @EnvironmentObject var theme: ThemeController
 
     @State private var editField: EditField?
+    @State private var showLanguageSheet = false
+    @State private var showThemeSheet = false
 
     enum EditField: String, Identifiable {
         case name, status
@@ -66,11 +69,11 @@ struct SettingsView: View {
                         .padding(.horizontal, 8)
                     }
                     .buttonStyle(.plain)
-                    NavigationLink(value: Route.fluxCoins) {
+                    NavigationLink(value: Route.coinsBot(sendTo: nil, sendAmount: nil)) {
                         FluxSettingsTile(
                             icon: "dollarsign.circle.fill",
                             title: "Flux Coins",
-                            subtitle: "\(backend.fluxCoins) монет",
+                            subtitle: "\(backend.fluxCoins) \(pluralRu(backend.fluxCoins, "монета", "монеты", "монет")) · @FluxCoinsBot",
                             iconColor: FluxColors.warning,
                             iconBackground: FluxColors.warning.opacity(0.13),
                             showDivider: true
@@ -141,6 +144,38 @@ struct SettingsView: View {
                     .padding(.horizontal, 8)
                 }
                 .settingsCard()
+
+                FluxSectionTitle(text: "Оформление и приватность")
+                VStack(spacing: 0) {
+                    NavigationLink(value: Route.privacy) {
+                        FluxSettingsTile(icon: "lock.fill", title: l10n.privacy, iconColor: FluxColors.violet, iconBackground: FluxColors.violetSoft, showDivider: true) { chevron }
+                            .padding(.horizontal, 8)
+                    }
+                    .buttonStyle(.plain)
+                    FluxSettingsTile(icon: "paintpalette.fill", title: l10n.theme, iconColor: FluxColors.violet, iconBackground: FluxColors.violetSoft, showDivider: true) {
+                        HStack(spacing: 6) {
+                            Text(currentThemeLabel)
+                                .font(.system(size: 14))
+                                .foregroundStyle(FluxColors.textSecondary)
+                            chevron
+                        }
+                    } onTap: {
+                        showThemeSheet = true
+                    }
+                    .padding(.horizontal, 8)
+                    FluxSettingsTile(icon: "globe", title: l10n.languageTitle, iconColor: FluxColors.online, iconBackground: FluxColors.online.opacity(0.12)) {
+                        HStack(spacing: 6) {
+                            Text(l10n.isRu ? "Русский" : "English")
+                                .font(.system(size: 14))
+                                .foregroundStyle(FluxColors.textSecondary)
+                            chevron
+                        }
+                    } onTap: {
+                        showLanguageSheet = true
+                    }
+                    .padding(.horizontal, 8)
+                }
+                .settingsCard()
             }
             .padding(.bottom, 32)
         }
@@ -151,6 +186,89 @@ struct SettingsView: View {
             EditFieldSheet(field: field)
                 .presentationDetents([.height(260)])
         }
+        .sheet(isPresented: $showThemeSheet) { themeSheet }
+        .sheet(isPresented: $showLanguageSheet) { languageSheet }
+    }
+
+    private var currentThemeLabel: String {
+        switch theme.mode {
+        case .light: return l10n.themeLight
+        case .dark: return l10n.themeDark
+        case .system: return l10n.themeSystem
+        }
+    }
+
+    private var themeSheet: some View {
+        VStack(spacing: 0) {
+            Capsule().fill(FluxColors.separator).frame(width: 40, height: 4).padding(.top, 10)
+            Text(l10n.theme)
+                .font(.system(size: 18, weight: .heavy))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(EdgeInsets(top: 18, leading: 20, bottom: 10, trailing: 20))
+            themeOption(l10n.themeLight, mode: .light, icon: "sun.max.fill")
+            themeOption(l10n.themeDark, mode: .dark, icon: "moon.fill")
+            themeOption(l10n.themeSystem, mode: .system, icon: "circle.lefthalf.filled")
+            Spacer(minLength: 12)
+        }
+        .background(FluxColors.background.ignoresSafeArea())
+        .presentationDetents([.height(320)])
+    }
+
+    private func themeOption(_ title: String, mode: ThemeController.Mode, icon: String) -> some View {
+        Button {
+            Haptics.selection()
+            theme.setMode(mode)
+            var prefs = backend.prefs
+            prefs.themeMode = theme.storedValue
+            Task { await backend.updatePrefs(prefs) }
+            showThemeSheet = false
+        } label: {
+            FluxSettingsTile(icon: icon, title: title, iconColor: FluxColors.violet, iconBackground: FluxColors.violetSoft) {
+                if theme.mode == mode {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 21))
+                        .foregroundStyle(FluxColors.online)
+                }
+            }
+            .padding(.horizontal, 8)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var languageSheet: some View {
+        VStack(spacing: 0) {
+            Capsule().fill(FluxColors.separator).frame(width: 40, height: 4).padding(.top, 10)
+            Text(l10n.languageTitle)
+                .font(.system(size: 18, weight: .heavy))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(EdgeInsets(top: 18, leading: 20, bottom: 10, trailing: 20))
+            languageOption("Русский", code: "ru")
+            languageOption("English", code: "en")
+            Spacer(minLength: 12)
+        }
+        .background(FluxColors.background.ignoresSafeArea())
+        .presentationDetents([.height(240)])
+    }
+
+    private func languageOption(_ title: String, code: String) -> some View {
+        Button {
+            Haptics.selection()
+            l10n.setLanguage(code)
+            var prefs = backend.prefs
+            prefs.language = code
+            Task { await backend.updatePrefs(prefs) }
+            showLanguageSheet = false
+        } label: {
+            FluxSettingsTile(icon: "character.bubble", title: title) {
+                if l10n.language == code {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 21))
+                        .foregroundStyle(FluxColors.online)
+                }
+            }
+            .padding(.horizontal, 8)
+        }
+        .buttonStyle(.plain)
     }
 
     private var chevron: some View {
@@ -161,12 +279,39 @@ struct SettingsView: View {
 }
 
 extension View {
+    /// Liquid Glass (0.3): translucent material fill, 1pt hairline border
+    /// and a subtle shadow. Reused by settings cards and other surfaces.
+    func glassCard(cornerRadius: CGFloat = 20) -> some View {
+        modifier(GlassCardModifier(cornerRadius: cornerRadius))
+    }
+
     func settingsCard() -> some View {
-        background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(FluxColors.surface)
-        )
-        .padding(.horizontal, 8)
+        glassCard(cornerRadius: 24)
+            .padding(.horizontal, 8)
+    }
+}
+
+/// Liquid-glass card background: `Material.ultraThinMaterial` fill with a
+/// soft border (white ~0.12 in dark, separator in light) and mild shadow.
+struct GlassCardModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let cornerRadius: CGFloat
+
+    private var borderColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.12) : FluxColors.separator
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Material.ultraThinMaterial)
+                    .shadow(color: Color(hex: 0x1A2340).opacity(0.05), radius: 16, y: 6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(borderColor, lineWidth: 1)
+                    )
+            )
     }
 }
 
