@@ -79,7 +79,7 @@ class LocalBackend: ObservableObject {
     // MARK: - State
 
     let defaults = UserDefaults.standard
-    private(set) var me: FluxUser?
+    internal(set) var me: FluxUser?
     private(set) var onboardedValue = false
 
     var contacts: [String: FluxUser] = [:]

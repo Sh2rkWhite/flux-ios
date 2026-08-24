@@ -321,7 +321,7 @@ final class FirestoreBackend: LocalBackend {
             fluxId = userId.uppercased()
         }
         guard let fluxId, !fluxId.isEmpty else { return nil }
-        if fluxId == me?.fluxId?.uppercased() { return nil }
+        if fluxId == me?.fluxId.uppercased() { return nil }
 
         do {
             let doc = try await db.collection("users").document(fluxId).getDocument()
@@ -893,10 +893,10 @@ final class FirestoreBackend: LocalBackend {
     // coins can never be released twice and balances can never go negative.
     // The transactionId stored on each record is its idempotency key.
     //
-    //   coinsBot/checks/{checkId}       — FluxCheck documents
-    //   coinsBot/p2p_offers/{offerId}   — FluxP2pOffer documents
-    //   coinsBot/p2p_deals/{dealId}     — FluxP2pDeal documents
-    //   coinsBot/transfers/{txId}       — transfer receipts (audit trail)
+    //   coinsBot/state/checks/{checkId}       — FluxCheck documents
+    //   coinsBot/state/p2p_offers/{offerId}   — FluxP2pOffer documents
+    //   coinsBot/state/p2p_deals/{dealId}     — FluxP2pDeal documents
+    //   coinsBot/state/transfers/{txId}       — transfer receipts (audit trail)
 
     private func profileDataRef(_ fluxId: String) -> DocumentReference {
         db.collection("users").document(fluxId).collection("profile").document("data")
@@ -1011,7 +1011,7 @@ final class FirestoreBackend: LocalBackend {
     private func listenCoinsBot() {
         guard remote, let myFluxId = me?.fluxId, !myFluxId.isEmpty, botChecksListener == nil else { return }
 
-        botChecksListener = db.collection("coinsBot/checks")
+        botChecksListener = db.collection("coinsBot/state/checks")
             .whereField("creatorFluxId", isEqualTo: myFluxId)
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self, let snapshot else {
@@ -1023,7 +1023,7 @@ final class FirestoreBackend: LocalBackend {
                 }
             }
 
-        botOffersListener = db.collection("coinsBot/p2p_offers")
+        botOffersListener = db.collection("coinsBot/state/p2p_offers")
             .order(by: "createdAtMs", descending: true)
             .limit(to: 100)
             .addSnapshotListener { [weak self] snapshot, error in
@@ -1036,7 +1036,7 @@ final class FirestoreBackend: LocalBackend {
                 }
             }
 
-        botDealsSellerListener = db.collection("coinsBot/p2p_deals")
+        botDealsSellerListener = db.collection("coinsBot/state/p2p_deals")
             .whereField("sellerFluxId", isEqualTo: myFluxId)
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self, let snapshot else {
@@ -1051,7 +1051,7 @@ final class FirestoreBackend: LocalBackend {
                 }
             }
 
-        botDealsBuyerListener = db.collection("coinsBot/p2p_deals")
+        botDealsBuyerListener = db.collection("coinsBot/state/p2p_deals")
             .whereField("buyerFluxId", isEqualTo: myFluxId)
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self, let snapshot else {
@@ -1089,7 +1089,7 @@ final class FirestoreBackend: LocalBackend {
         }
         let txId = UUID().uuidString
         let myRef = profileDataRef(myFluxId)
-        let receiptRef = db.collection("coinsBot/transfers").document(txId)
+        let receiptRef = db.collection("coinsBot/state/transfers").document(txId)
         let myUserId = me?.id ?? "me"
 
         try await runCoinsBotTransaction(fallback: "Перевод не выполнен. Попробуйте ещё раз.") { transaction in
@@ -1175,7 +1175,7 @@ final class FirestoreBackend: LocalBackend {
                 "coinTransactions": myTxs,
                 "updatedAt": FieldValue.serverTimestamp(),
             ], forDocument: myRef, merge: true)
-            transaction.setData(check.toJson(), forDocument: self.db.collection("coinsBot/checks").document(check.id))
+            transaction.setData(check.toJson(), forDocument: self.db.collection("coinsBot/state/checks").document(check.id))
         }
         await reloadCoinsFromRemote()
         syncBotChecks([check] + myChecks.filter { $0.id != check.id })
@@ -1185,7 +1185,7 @@ final class FirestoreBackend: LocalBackend {
     override func redeemCheck(_ checkId: String) async throws -> FluxCheck {
         guard remote else { return try await super.redeemCheck(checkId) }
         let myFluxId = try requireMyFluxId()
-        let checkRef = db.collection("coinsBot/checks").document(checkId)
+        let checkRef = db.collection("coinsBot/state/checks").document(checkId)
         var consumed: FluxCheck?
         try await runCoinsBotTransaction(fallback: "Не удалось получить чек. Попробуйте ещё раз.") { transaction in
             let snap = try transaction.getDocument(checkRef)
@@ -1218,7 +1218,7 @@ final class FirestoreBackend: LocalBackend {
     override func cancelCheck(_ checkId: String) async throws {
         guard remote else { return try await super.cancelCheck(checkId) }
         let myFluxId = try requireMyFluxId()
-        let checkRef = db.collection("coinsBot/checks").document(checkId)
+        let checkRef = db.collection("coinsBot/state/checks").document(checkId)
         try await runCoinsBotTransaction(fallback: "Не удалось отменить чек. Попробуйте ещё раз.") { transaction in
             let snap = try transaction.getDocument(checkRef)
             guard snap.exists, let data = snap.data() else { throw FluxError("Чек не найден") }
@@ -1277,7 +1277,7 @@ final class FirestoreBackend: LocalBackend {
                 "coinTransactions": myTxs,
                 "updatedAt": FieldValue.serverTimestamp(),
             ], forDocument: myRef, merge: true)
-            transaction.setData(offer.toJson(), forDocument: self.db.collection("coinsBot/p2p_offers").document(offer.id))
+            transaction.setData(offer.toJson(), forDocument: self.db.collection("coinsBot/state/p2p_offers").document(offer.id))
         }
         await reloadCoinsFromRemote()
         return offer
@@ -1286,7 +1286,7 @@ final class FirestoreBackend: LocalBackend {
     override func acceptP2pOffer(_ offerId: String) async throws -> FluxP2pDeal {
         guard remote else { return try await super.acceptP2pOffer(offerId) }
         let myFluxId = try requireMyFluxId()
-        let offerRef = db.collection("coinsBot/p2p_offers").document(offerId)
+        let offerRef = db.collection("coinsBot/state/p2p_offers").document(offerId)
         var deal: FluxP2pDeal?
         try await runCoinsBotTransaction(fallback: "Не удалось принять предложение. Попробуйте ещё раз.") { transaction in
             let snap = try transaction.getDocument(offerRef)
@@ -1310,7 +1310,7 @@ final class FirestoreBackend: LocalBackend {
             // Coins were escrowed when the offer was created; matching only
             // flips statuses. The transaction makes double-accept impossible.
             transaction.updateData(["status": OfferStatus.matched.rawValue], forDocument: offerRef)
-            transaction.setData(newDeal.toJson(), forDocument: self.db.collection("coinsBot/p2p_deals").document(newDeal.id))
+            transaction.setData(newDeal.toJson(), forDocument: self.db.collection("coinsBot/state/p2p_deals").document(newDeal.id))
             deal = newDeal
         }
         guard let deal else { throw FluxError("Не удалось принять предложение. Попробуйте ещё раз.") }
@@ -1320,7 +1320,7 @@ final class FirestoreBackend: LocalBackend {
     override func confirmP2pDeal(_ dealId: String) async throws -> FluxP2pDeal {
         guard remote else { return try await super.confirmP2pDeal(dealId) }
         let myFluxId = try requireMyFluxId()
-        let dealRef = db.collection("coinsBot/p2p_deals").document(dealId)
+        let dealRef = db.collection("coinsBot/state/p2p_deals").document(dealId)
         var done: FluxP2pDeal?
         try await runCoinsBotTransaction(fallback: "Не удалось подтвердить сделку. Попробуйте ещё раз.") { transaction in
             let snap = try transaction.getDocument(dealRef)
@@ -1351,7 +1351,7 @@ final class FirestoreBackend: LocalBackend {
     override func disputeP2pDeal(_ dealId: String) async throws -> FluxP2pDeal {
         guard remote else { return try await super.disputeP2pDeal(dealId) }
         _ = try requireMyFluxId()
-        let dealRef = db.collection("coinsBot/p2p_deals").document(dealId)
+        let dealRef = db.collection("coinsBot/state/p2p_deals").document(dealId)
         var disputed: FluxP2pDeal?
         try await runCoinsBotTransaction(fallback: "Не удалось открыть спор. Попробуйте ещё раз.") { transaction in
             let snap = try transaction.getDocument(dealRef)
@@ -1368,8 +1368,8 @@ final class FirestoreBackend: LocalBackend {
     override func cancelP2p(_ refId: String) async throws {
         guard remote else { return try await super.cancelP2p(refId) }
         let myFluxId = try requireMyFluxId()
-        let offerRef = db.collection("coinsBot/p2p_offers").document(refId)
-        let dealRef = db.collection("coinsBot/p2p_deals").document(refId)
+        let offerRef = db.collection("coinsBot/state/p2p_offers").document(refId)
+        let dealRef = db.collection("coinsBot/state/p2p_deals").document(refId)
         try await runCoinsBotTransaction(fallback: "Не удалось отменить. Попробуйте ещё раз.") { transaction in
             let nowMs = Int(Date().timeIntervalSince1970 * 1000)
             let offerSnap = try transaction.getDocument(offerRef)
