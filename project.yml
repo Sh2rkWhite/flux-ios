@@ -33,6 +33,10 @@ targets:
         product: FirebaseCore
       - package: Firebase
         product: FirebaseFirestore
+      - package: Firebase
+        product: FirebaseAuth
+      - package: Firebase
+        product: FirebaseStorage
     info:
       path: Flux/Info.plist
       properties:
